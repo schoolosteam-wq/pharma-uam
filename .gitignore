@@ -1,0 +1,22 @@
+# Node modules
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Environment files (अगर secret data हो)
+server/.env
+client/.env
+
+# Build outputs
+client/build/
+server/uploads/
+server/uploads/documents/
+server/uploads/logos/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
