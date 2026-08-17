@@ -81,6 +81,10 @@ exports.signin = async (req, res) => {
       where: { username: { [Op.iLike]: username } },
       include: [{ model: db.Role, as: "roles" }]
     });
+
+    if (!user) {
+      return res.status(401).send({ message: "Invalid credentials" });
+    }
     if (!user.isActive) {
       await AuditTrail.create({
         entityType: "USER",

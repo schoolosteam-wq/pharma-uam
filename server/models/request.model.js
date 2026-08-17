@@ -50,7 +50,13 @@ module.exports = (sequelize, DataTypes) => {
       references: { model: "requests", key: "id" }
     },
     createdBy: DataTypes.INTEGER,
-    updatedBy: DataTypes.INTEGER
+    updatedBy: DataTypes.INTEGER,
+
+    facilityId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "facilities", key: "id" }
+    },
   }, {
     tableName: "requests",
     timestamps: true

@@ -17,7 +17,13 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: "ACTIVE"
     },
     createdBy: DataTypes.INTEGER,
-    updatedBy: DataTypes.INTEGER
+    updatedBy: DataTypes.INTEGER,
+    
+    facilityId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "facilities", key: "id" }
+    },
   }, {
     tableName: "applications",
     timestamps: true
