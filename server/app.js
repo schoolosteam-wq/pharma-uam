@@ -7,6 +7,7 @@ app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static('uploads'));
 
 // Routes
 const authRoutes = require("./routes/auth.routes");
@@ -31,6 +32,7 @@ const activityWorkflowRoutes = require("./routes/activityWorkflow.routes");
 const applicationAdminGroupRoutes = require("./routes/applicationAdminGroup.routes");
 const roleRoutes = require("./routes/role.routes");
 const groupRoutes = require("./routes/group.routes");
+const reportTemplateRoutes = require("./routes/reportTemplate.routes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/facilities", facilityRoutes);
@@ -54,6 +56,7 @@ app.use("/api/activity-workflows", activityWorkflowRoutes);
 app.use("/api/applications", applicationAdminGroupRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/groups", groupRoutes);
+app.use("/api/report-templates", reportTemplateRoutes);
 
 // Health check
 app.get("/", (req, res) => {

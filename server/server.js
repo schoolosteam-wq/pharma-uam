@@ -7,7 +7,7 @@ const { startScheduler } = require("./cron/scheduler");
 const PORT = process.env.PORT || 5000;
 
 // Sync database and seed
-db.sequelize.sync({ force: false }).then(async () => {
+db.sequelize.sync({ force: true }).then(async () => {
   console.log("Database synced.");
 
   // Seed default roles

@@ -40,6 +40,7 @@ db.WorkflowHistory = require("./workflowHistory.model")(sequelize, Sequelize);
 db.UserFacility = require("./userFacility.model")(sequelize, Sequelize);
 db.UserApplicationRole = require("./userApplicationRole.model")(sequelize, Sequelize);
 db.UserApplicationGroup = require("./userApplicationGroup.model")(sequelize, Sequelize);
+db.ReportTemplate = require("./reportTemplate.model")(sequelize, Sequelize);
 
 // ✅ New model: ApplicationAdminGroup
 db.ApplicationAdminGroup = require("./applicationAdminGroup.model")(sequelize, Sequelize);
@@ -162,5 +163,8 @@ db.ApplicationActivity.belongsTo(db.Application, { foreignKey: "applicationId" }
 // ApplicationAdminGroup direct associations
 db.ApplicationAdminGroup.belongsTo(db.Group, { foreignKey: "groupId" });
 db.ApplicationAdminGroup.belongsTo(db.Application, { foreignKey: "applicationId" });
+
+db.ReportTemplate.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
+db.Facility.hasMany(db.ReportTemplate, { foreignKey: "facilityId", as: "reportTemplates" });
 
 module.exports = db;

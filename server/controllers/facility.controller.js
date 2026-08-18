@@ -69,6 +69,7 @@ exports.create = async (req, res) => {
     await auditHelper("FACILITY", facility.id, "CREATED", null, cleanNewValue, req.userId, req.ip, "Facility created");
     res.status(201).send(facility);
   } catch (error) {
+    console.error("Facility create error:", error);
     res.status(500).send({ message: error.message });
   }
 };
