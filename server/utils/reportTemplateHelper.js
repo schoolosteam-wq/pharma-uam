@@ -8,7 +8,6 @@ const defaultTemplate = {
   logoHeight: 50,
   companyName: null,
   reportTitle: "Active User Report",
-  customHeaderText: null,
   footerText: "This report is system generated and does not require signature",
   showPageNumber: true,
   showPreparedBy: false,
@@ -40,25 +39,38 @@ const defaultTemplate = {
   tableHeaderTextColor: "#ffffff",
   tableBorderColor: "#dddddd",
   tableColumns: ["srNo", "fullName", "employeeId", "roles", "status"],
+  orientation: "PORTRAIT",
+  headerTemplateHtml: null,
+  footerTemplateHtml: null,
 };
 
-async function getEffectiveTemplate(facilityId) {
+async function getEffectiveTemplate(facilityId, reportType = "activeUsers") {
   let template = null;
   if (facilityId) {
-    template = await db.ReportTemplate.findOne({ where: { facilityId } });
+    template = await db.ReportTemplate.findOne({ where: { facilityId, reportType } });
   }
   if (!template) {
-    template = await db.ReportTemplate.findOne({ where: { facilityId: null } });
+    template = await db.ReportTemplate.findOne({ where: { facilityId: null, reportType } });
   }
-  if (template) {
-    const data = template.toJSON();
-    // Ensure tableColumns is array
-    if (!Array.isArray(data.tableColumns) || data.tableColumns.length === 0) {
-      data.tableColumns = defaultTemplate.tableColumns;
-    }
-    return { ...defaultTemplate, ...data };
+  if (!template) {
+    // fallback default with reportType-specific defaults
+    let defaultCols = defaultTemplate.tableColumns;
+    if (reportType === "application") defaultCols = ["name", "manufacturer", "versionNo", "status", "facilityName"];
+    if (reportType === "instrument") defaultCols = ["make", "model", "serialNumber", "status", "applicationName"];
+    if (reportType === "computer") defaultCols = ["computerMakeModel", "serialNumber", "ipAddress", "status"];
+    if (reportType === "audit") defaultCols = ["entityType", "action", "changedBy", "ipAddress", "changedAt"];
+    return { ...defaultTemplate, reportType, tableColumns: defaultCols, reportTitle: reportType.charAt(0).toUpperCase() + reportType.slice(1) + " Report" };
   }
-  return defaultTemplate;
+  const data = template.toJSON();
+  if (!Array.isArray(data.tableColumns) || data.tableColumns.length === 0) {
+    // fallback based on reportType
+    if (reportType === "application") data.tableColumns = ["name", "manufacturer", "versionNo", "status", "facilityName"];
+    else if (reportType === "instrument") data.tableColumns = ["make", "model", "serialNumber", "status", "applicationName"];
+    else if (reportType === "computer") data.tableColumns = ["computerMakeModel", "serialNumber", "ipAddress", "status"];
+    else if (reportType === "audit") data.tableColumns = ["entityType", "action", "changedBy", "ipAddress", "changedAt"];
+    else data.tableColumns = defaultTemplate.tableColumns;
+  }
+  return { ...defaultTemplate, ...data };
 }
 
 module.exports = { getEffectiveTemplate, defaultTemplate };

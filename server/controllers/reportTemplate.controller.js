@@ -1,16 +1,20 @@
 // server/controllers/reportTemplate.controller.js
 const db = require("../models");
 const ReportTemplate = db.ReportTemplate;
-const Facility = db.Facility;
 const { auditHelper } = require("../utils/auditHelper");
 const path = require("path");
 const fs = require("fs");
 
-// GET template – pass facilityId as query, if not given return global
+// GET template – pass facilityId & reportType as query
 exports.getTemplate = async (req, res) => {
   try {
-    const { facilityId } = req.query;
-    const where = facilityId ? { facilityId } : { facilityId: null };
+    const { facilityId, reportType } = req.query;
+    const where = { reportType: reportType || "activeUsers" };
+    if (facilityId) {
+      where.facilityId = facilityId;
+    } else {
+      where.facilityId = null; // global
+    }
     const template = await ReportTemplate.findOne({ where });
     res.send(template || {});
   } catch (error) {
@@ -21,14 +25,21 @@ exports.getTemplate = async (req, res) => {
 // Save or update template
 exports.saveTemplate = async (req, res) => {
   try {
-    const { facilityId, ...templateData } = req.body;
-    const where = facilityId ? { facilityId } : { facilityId: null };
+    const { facilityId, reportType, ...templateData } = req.body;
+    if (!reportType) return res.status(400).send({ message: "reportType is required" });
+
+    const where = { reportType };
+    if (facilityId) {
+      where.facilityId = facilityId;
+    } else {
+      where.facilityId = null;
+    }
     let template = await ReportTemplate.findOne({ where });
 
     if (template) {
-      await template.update({ facilityId: facilityId || null, ...templateData });
+      await template.update({ facilityId: facilityId || null, reportType, ...templateData });
     } else {
-      template = await ReportTemplate.create({ facilityId: facilityId || null, ...templateData });
+      template = await ReportTemplate.create({ facilityId: facilityId || null, reportType, ...templateData });
     }
 
     await auditHelper(
@@ -36,7 +47,7 @@ exports.saveTemplate = async (req, res) => {
       template.id,
       template ? "UPDATED" : "CREATED",
       null,
-      { facilityId: facilityId || "Global", ...templateData },
+      { facilityId: facilityId || "Global", reportType, ...templateData },
       req.userId,
       req.ip,
       "Report template saved"
@@ -51,9 +62,7 @@ exports.saveTemplate = async (req, res) => {
 // Upload logo – returns logoPath
 exports.uploadLogo = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).send({ message: "No file uploaded" });
-    }
+    if (!req.file) return res.status(400).send({ message: "No file uploaded" });
     const logoPath = `/uploads/templates/${req.file.filename}`;
     res.send({ logoPath });
   } catch (error) {
@@ -61,12 +70,10 @@ exports.uploadLogo = async (req, res) => {
   }
 };
 
-// Upload reference PDF/Image – temporary preview, not saved
+// Upload reference PDF/Image – temporary preview
 exports.uploadReference = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).send({ message: "No file uploaded" });
-    }
+    if (!req.file) return res.status(400).send({ message: "No file uploaded" });
     const fileUrl = `/uploads/templates/reference/${req.file.filename}`;
     res.send({ fileUrl });
   } catch (error) {
@@ -74,27 +81,26 @@ exports.uploadReference = async (req, res) => {
   }
 };
 
-// Copy template from one facility to another (facilityId null = global)
+// Copy template from one facility to another
 exports.copyTemplate = async (req, res) => {
   try {
-    const { fromFacilityId, toFacilityId } = req.body;
-    if (fromFacilityId === undefined || toFacilityId === undefined) {
-      return res.status(400).send({ message: "fromFacilityId and toFacilityId are required" });
+    const { fromFacilityId, toFacilityId, reportType } = req.body;
+    if (fromFacilityId === undefined || toFacilityId === undefined || !reportType) {
+      return res.status(400).send({ message: "fromFacilityId, toFacilityId and reportType are required" });
     }
 
-    const fromWhere = fromFacilityId ? { facilityId: fromFacilityId } : { facilityId: null };
+    const fromWhere = { reportType, facilityId: fromFacilityId || null };
     const fromTemplate = await ReportTemplate.findOne({ where: fromWhere });
-    if (!fromTemplate) {
-      return res.status(404).send({ message: "Source template not found" });
-    }
+    if (!fromTemplate) return res.status(404).send({ message: "Source template not found" });
 
     const data = fromTemplate.toJSON();
     delete data.id;
     delete data.createdAt;
     delete data.updatedAt;
     data.facilityId = toFacilityId || null;
+    data.reportType = reportType;
 
-    const toWhere = toFacilityId ? { facilityId: toFacilityId } : { facilityId: null };
+    const toWhere = { reportType, facilityId: toFacilityId || null };
     let existing = await ReportTemplate.findOne({ where: toWhere });
     if (existing) {
       await existing.update(data);
@@ -107,7 +113,7 @@ exports.copyTemplate = async (req, res) => {
       existing?.id || "NEW",
       "COPIED",
       null,
-      { from: fromFacilityId || "Global", to: toFacilityId || "Global" },
+      { from: fromFacilityId || "Global", to: toFacilityId || "Global", reportType },
       req.userId,
       req.ip,
       "Report template copied"

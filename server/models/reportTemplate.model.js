@@ -8,9 +8,14 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         references: { model: "facilities", key: "id" },
       },
+      reportType: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        defaultValue: "activeUsers",
+      },
       logoPath: DataTypes.STRING(500),
       logoAlignment: {
-        type: DataTypes.ENUM("LEFT", "RIGHT"),
+        type: DataTypes.ENUM("LEFT", "CENTER", "RIGHT"),
         defaultValue: "LEFT",
       },
       logoWidth: {
@@ -23,8 +28,9 @@ module.exports = (sequelize, DataTypes) => {
       },
       companyName: DataTypes.STRING(200),
       reportTitle: DataTypes.STRING(200),
-      customHeaderText: DataTypes.TEXT,
       footerText: DataTypes.TEXT,
+      headerTemplateHtml: DataTypes.TEXT,
+      footerTemplateHtml: DataTypes.TEXT,
 
       showPageNumber: {
         type: DataTypes.BOOLEAN,
@@ -154,6 +160,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.JSONB,
         defaultValue: ["srNo", "fullName", "employeeId", "roles", "status"],
       },
+      orientation: {
+        type: DataTypes.ENUM("PORTRAIT", "LANDSCAPE"),
+        defaultValue: "PORTRAIT",
+      },
     },
     {
       tableName: "report_templates",
@@ -161,7 +171,7 @@ module.exports = (sequelize, DataTypes) => {
       indexes: [
         {
           unique: true,
-          fields: ["facilityId"],
+          fields: ["facilityId", "reportType"],
         },
       ],
     }
