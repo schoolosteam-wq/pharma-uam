@@ -1,6 +1,8 @@
-// ApplicationList.jsx – Final with permission-based UI controls + Admin Groups column
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Space, message, Modal, Form, Input, Select, Popconfirm, Tag, TreeSelect } from 'antd';
+import {
+  Table, Button, Space, message, Modal, Form, Input, Select,
+  Popconfirm, Tag, TreeSelect, Row, Col, DatePicker, Radio,
+} from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -26,19 +28,23 @@ const ApplicationList = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
+  // Dynamic roles/groups lists (for modal)
   const [roleInput, setRoleInput] = useState('');
   const [groupInput, setGroupInput] = useState('');
   const [rolesList, setRolesList] = useState([]);
   const [groupsList, setGroupsList] = useState([]);
+
+  // Dropdown data
   const [facilities, setFacilities] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
 
   const { canCreate, canEdit, canDelete } = usePermission();
-
   const { permissions } = useAuth();
 
   const hasBulkUploadPermission = permissions.includes('MANAGE_APPLICATION_BULK_UPLOAD');
 
+  // ---------- Data fetching ----------
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -50,43 +56,45 @@ const ApplicationList = () => {
     setLoading(false);
   };
 
-  const fetchFacilities = async () => {
+  const fetchDropdowns = async () => {
     try {
-      const res = await facilityService.getAll();
-      const flatten = (nodes) => {
+      const [facRes, deptRes, groupRes] = await Promise.all([
+        facilityService.getAll(),
+        facilityService.getByType('DEPARTMENT'),
+        groupService.getAll(),
+      ]);
+      // Flatten facility tree to get only FACTORY nodes
+      const flattenFac = (nodes) => {
         let list = [];
         nodes.forEach(node => {
           if (node.type === 'FACTORY') {
             list.push({ id: node.id, name: node.name, code: node.code });
           }
-          if (node.children) list = list.concat(flatten(node.children));
+          if (node.children) list = list.concat(flattenFac(node.children));
         });
         return list;
       };
-      setFacilities(flatten(res.data));
-    } catch (error) { /* ignore */ }
-  };
-
-  const fetchGroups = async () => {
-    try {
-      const res = await groupService.getAll();
-      setAllGroups(res.data);
+      setFacilities(flattenFac(facRes.data));
+      setDepartments(deptRes.data || []);
+      setAllGroups(groupRes.data || []);
     } catch (error) {
-      message.error('Failed to load groups');
+      message.error('Failed to load dropdown data');
     }
   };
 
   useEffect(() => {
     fetchData();
-    fetchFacilities();
-    fetchGroups();
+    fetchDropdowns();
   }, []);
 
-  const buildFacilityTree = (list) => list.map(item => ({
-    value: item.id,
-    title: `${item.code} - ${item.name}`,
-  }));
+  // ---------- Utility ----------
+  const buildFacilityTree = (list) =>
+    list.map(item => ({
+      value: item.id,
+      title: `${item.code} - ${item.name}`,
+    }));
 
+  // ---------- Modal handlers ----------
   const handleAdd = () => {
     setEditing(null);
     form.resetFields();
@@ -106,6 +114,15 @@ const ApplicationList = () => {
       oemContact: record.oemContact,
       status: record.status,
       facilityId: record.facility?.id || undefined,
+      departmentId: record.department?.id || undefined,
+      applicationOwner: record.applicationOwner || undefined,
+      gampCategory: record.gampCategory || undefined,
+      validated: record.validated,
+      eresApplicable: record.eresApplicable,
+      lastPeriodicReviewDate: record.lastPeriodicReviewDate ? record.lastPeriodicReviewDate : null,
+      databaseType: record.databaseType || undefined,
+      auditTrailEnabled: record.auditTrailEnabled,
+      applicationCriticality: record.applicationCriticality || undefined,
       adminGroups: record.adminGroups?.map(g => g.id) || [],
     });
     setRolesList(record.roles || []);
@@ -134,9 +151,18 @@ const ApplicationList = () => {
         versionNo: values.versionNo || null,
         oemContact: values.oemContact || null,
         status: values.status || 'ACTIVE',
+        facilityId: values.facilityId || null,
+        departmentId: values.departmentId || null,
+        applicationOwner: values.applicationOwner || null,
+        gampCategory: values.gampCategory || null,
+        validated: values.validated ?? false,
+        eresApplicable: values.eresApplicable ?? false,
+        lastPeriodicReviewDate: values.lastPeriodicReviewDate || null,
+        databaseType: values.databaseType || null,
+        auditTrailEnabled: values.auditTrailEnabled ?? false,
+        applicationCriticality: values.applicationCriticality || null,
         roles: rolesList,
         groups: groupsList,
-        facilityId: values.facilityId || null,
         adminGroups: values.adminGroups || [],
       };
       if (editing) {
@@ -155,6 +181,7 @@ const ApplicationList = () => {
     }
   };
 
+  // ---------- Dynamic role/group tag helpers ----------
   const addRole = () => {
     const trimmed = roleInput.trim();
     if (trimmed && !rolesList.includes(trimmed)) {
@@ -179,6 +206,7 @@ const ApplicationList = () => {
     setGroupsList(groupsList.filter((g) => g !== group));
   };
 
+  // ---------- CSV sample ----------
   const handleDownloadSample = async () => {
     try {
       const res = await applicationService.downloadSampleCsv();
@@ -194,6 +222,7 @@ const ApplicationList = () => {
     }
   };
 
+  // ---------- Table columns ----------
   const columns = [
     { title: 'Name', dataIndex: 'name' },
     { title: 'Manufacturer', dataIndex: 'manufacturer' },
@@ -202,22 +231,31 @@ const ApplicationList = () => {
     { title: 'Instruments', dataIndex: 'instrumentCount', align: 'center' },
     { title: 'Computers', dataIndex: 'computerCount', align: 'center' },
     { title: 'Facility', render: (_, rec) => rec.facility?.name || '-' },
-    // ✅ Admin Groups column (title changed from "Admin" to "Admin Groups")
     {
       title: 'Admin Groups',
       key: 'adminGroups',
       render: (_, record) => {
         const groups = record.adminGroups || [];
         return groups.map(g => g.groupName).join(', ') || '-';
-      }
+      },
     },
     {
       title: 'Actions',
       render: (_, record) => (
         <Space>
-          <Button icon={<EyeOutlined />} size="small" onClick={() => navigate(`/applications/${record.id}`)}>View</Button>
+          <Button
+            icon={<EyeOutlined />}
+            size="small"
+            onClick={() => navigate(`/applications/${record.id}`)}
+          >
+            View
+          </Button>
           {canEdit('APPLICATION') && (
-            <Button icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)} />
+            <Button
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => handleEdit(record)}
+            />
           )}
           {canDelete('APPLICATION') && (
             <Popconfirm title="Sure?" onConfirm={() => handleDelete(record.id)}>
@@ -229,6 +267,7 @@ const ApplicationList = () => {
     },
   ];
 
+  // ---------- Render ----------
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
@@ -236,16 +275,25 @@ const ApplicationList = () => {
         <Space>
           {hasBulkUploadPermission && (
             <>
-              <Button icon={<DownloadOutlined />} onClick={handleDownloadSample}>Sample CSV</Button>
-              <Button icon={<UploadOutlined />} onClick={() => navigate('/applications/csv')}>Bulk Upload</Button>
+              <Button icon={<DownloadOutlined />} onClick={handleDownloadSample}>
+                Sample CSV
+              </Button>
+              <Button icon={<UploadOutlined />} onClick={() => navigate('/applications/csv')}>
+                Bulk Upload
+              </Button>
             </>
           )}
           {canCreate('APPLICATION') && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>Add Application</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+              Add Application
+            </Button>
           )}
         </Space>
       </div>
+
       <Table dataSource={data} columns={columns} rowKey="id" loading={loading} />
+
+      {/* ---------- Modal ---------- */}
       <Modal
         title={editing ? 'Edit Application' : 'Add Application'}
         open={modalVisible}
@@ -253,72 +301,212 @@ const ApplicationList = () => {
         onCancel={() => setModalVisible(false)}
         destroyOnClose
         forceRender
-        width={600}
+        width={900}
+        style={{ top: 20 }}
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="Application Name" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="manufacturer" label="Manufacturer"><Input /></Form.Item>
-          <Form.Item name="versionNo" label="Version No"><Input /></Form.Item>
-          <Form.Item name="oemContact" label="OEM Contact"><Input.TextArea rows={2} /></Form.Item>
-          <Form.Item name="status" label="Status" initialValue="ACTIVE">
-            <Select>
-              <Option value="ACTIVE">Active</Option>
-              <Option value="RETIRED">Retired</Option>
-            </Select>
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="name"
+                label="Application Name"
+                rules={[{ required: true }]}
+              >
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="manufacturer" label="Manufacturer">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item name="facilityId" label="Facility">
-            <TreeSelect
-              treeData={buildFacilityTree(facilities)}
-              placeholder="Select facility"
-              treeDefaultExpandAll
-              allowClear
-            />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="versionNo" label="Version No">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="oemContact" label="OEM Contact">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="status" label="Status" initialValue="ACTIVE">
+                <Select>
+                  <Option value="ACTIVE">Active</Option>
+                  <Option value="RETIRED">Retired</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item name="adminGroups" label="Admin Groups">
-            <Select mode="multiple" allowClear placeholder="Select admin groups">
-              {allGroups.map(g => (
-                <Option key={g.id} value={g.id}>{g.groupName}</Option>
-              ))}
-            </Select>
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="facilityId" label="Facility">
+                <TreeSelect
+                  treeData={buildFacilityTree(facilities)}
+                  placeholder="Select facility"
+                  treeDefaultExpandAll
+                  allowClear
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="departmentId" label="Department">
+                <Select placeholder="Select department" allowClear>
+                  {departments.map(d => (
+                    <Option key={d.id} value={d.id}>
+                      {d.name} ({d.code})
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="applicationOwner" label="Application Owner">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item label="Application Roles">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Input.Search
-                placeholder="Enter role name"
-                value={roleInput}
-                onChange={(e) => setRoleInput(e.target.value)}
-                enterButton="Add"
-                onSearch={addRole}
-                onPressEnter={addRole}
-              />
-              <Space wrap>
-                {rolesList.map((role) => (
-                  <Tag key={role} closable onClose={() => removeRole(role)}>{role}</Tag>
-                ))}
-              </Space>
-            </Space>
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={4}>
+              <Form.Item name="gampCategory" label="GAMP Category">
+                <Select allowClear placeholder="Select">
+                  <Option value="1">1</Option>
+                  <Option value="3">3</Option>
+                  <Option value="4">4</Option>
+                  <Option value="5">5</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={5}>
+              <Form.Item
+                name="validated"
+                label="Validated"
+                valuePropName="checked"
+              >
+                <Radio.Group>
+                  <Radio value={true}>Yes</Radio>
+                  <Radio value={false}>No</Radio>
+                </Radio.Group>
+              </Form.Item>
+            </Col>
+            <Col span={5}>
+              <Form.Item
+                name="eresApplicable"
+                label="ERES Applicable"
+                valuePropName="checked"
+              >
+                <Radio.Group>
+                  <Radio value={true}>Yes</Radio>
+                  <Radio value={false}>No</Radio>
+                </Radio.Group>
+              </Form.Item>
+            </Col>
+            <Col span={5}>
+              <Form.Item
+                name="auditTrailEnabled"
+                label="Audit Trail Enabled"
+                valuePropName="checked"
+              >
+                <Radio.Group>
+                  <Radio value={true}>Yes</Radio>
+                  <Radio value={false}>No</Radio>
+                </Radio.Group>
+              </Form.Item>
+            </Col>
+            <Col span={5}>
+              <Form.Item name="applicationCriticality" label="Criticality">
+                <Select allowClear placeholder="Select">
+                  <Option value="High">High</Option>
+                  <Option value="Medium">Medium</Option>
+                  <Option value="Low">Low</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item label="Application Groups">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Input.Search
-                placeholder="Enter group name"
-                value={groupInput}
-                onChange={(e) => setGroupInput(e.target.value)}
-                enterButton="Add"
-                onSearch={addGroup}
-                onPressEnter={addGroup}
-              />
-              <Space wrap>
-                {groupsList.map((group) => (
-                  <Tag key={group} closable onClose={() => removeGroup(group)}>{group}</Tag>
-                ))}
-              </Space>
-            </Space>
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="databaseType" label="Database Type">
+                <Select allowClear placeholder="Select">
+                  <Option value="Oracle">Oracle</Option>
+                  <Option value="SQL Server">SQL Server</Option>
+                  <Option value="Local File Base">Local File Base</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="lastPeriodicReviewDate"
+                label="Last Periodic Review Date"
+              >
+                <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="adminGroups" label="Admin Groups">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Select admin groups"
+                >
+                  {allGroups.map(g => (
+                    <Option key={g.id} value={g.id}>{g.groupName}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="Application Roles">
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Input.Search
+                    placeholder="Enter role name"
+                    value={roleInput}
+                    onChange={(e) => setRoleInput(e.target.value)}
+                    enterButton="Add"
+                    onSearch={addRole}
+                    onPressEnter={addRole}
+                  />
+                  <Space wrap>
+                    {rolesList.map((role) => (
+                      <Tag key={role} closable onClose={() => removeRole(role)}>
+                        {role}
+                      </Tag>
+                    ))}
+                  </Space>
+                </Space>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Application Groups">
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Input.Search
+                    placeholder="Enter group name"
+                    value={groupInput}
+                    onChange={(e) => setGroupInput(e.target.value)}
+                    enterButton="Add"
+                    onSearch={addGroup}
+                    onPressEnter={addGroup}
+                  />
+                  <Space wrap>
+                    {groupsList.map((group) => (
+                      <Tag key={group} closable onClose={() => removeGroup(group)}>
+                        {group}
+                      </Tag>
+                    ))}
+                  </Space>
+                </Space>
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
     </div>

@@ -5,6 +5,7 @@ const getOne = (id) => API.get(`/computers/${id}`);
 const create = (data) => API.post('/computers', data);
 const update = (id, data) => API.put(`/computers/${id}`, data);
 const remove = (id) => API.delete(`/computers/${id}`);
+const downloadSampleCsv = () => API.get('/computers/sample-csv', { responseType: 'blob' });
 
-const computerService = { getAll, getOne, create, update, remove };
+const computerService = { getAll, getOne, create, update, remove, downloadSampleCsv };
 export default computerService;

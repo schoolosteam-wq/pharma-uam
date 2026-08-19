@@ -173,3 +173,13 @@ exports.delete = async (req, res) => {
     res.status(500).send({ message: error.message });
   }
 };
+
+exports.downloadSampleCsv = async (req, res) => {
+  const csvContent =
+    "Hostname,Computer Make & Model,Serial Number,Asset Code,OS Version,Antivirus Status,Domain Status,System Owner,CSV Done,Location,IP Address,Status,Department,Facility,Instrument IDs\n" +
+    "PC001,Dell Optiplex 7090,SNPC001,ASTPC001,Windows 10 Pro,Installed,AD Joined,John Doe,Yes,Lab1,192.168.1.100,ACTIVE,,,\"INS001,INS002\"\n" +
+    "PC002,HP EliteDesk,SNPC002,ASTPC002,Windows 11 Pro,Not Installed,Workgroup,Jane Smith,No,Lab2,192.168.1.101,ACTIVE,,,\n";
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", "attachment; filename=sample_computers.csv");
+  res.send(csvContent);
+};

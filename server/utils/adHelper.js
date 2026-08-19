@@ -1,10 +1,10 @@
-// server/utils/adHelper.js – Complete with OU‑based facility assignment & disabled handling
+// server/utils/adHelper.js – Complete with OU‑based facility assignment, disabled handling, manager & audit
 const ldap = require("ldapjs");
 const db = require("../models");
 const Role = db.Role;
 const User = db.User;
 const Facility = db.Facility;
-const { auditHelper } = require("../utils/auditHelper");   // ✅ audit import
+const { auditHelper } = require("../utils/auditHelper");
 
 async function getADConfig() {
   const Setting = db.Setting;
@@ -39,7 +39,6 @@ function createClient(config) {
         client.destroy();
         return reject(err);
       }
-      // Remove one-time listeners to avoid memory leaks
       client.removeListener('connectTimeout', onTimeout);
       client.removeListener('error', onError);
       resolve(client);
@@ -50,12 +49,12 @@ function createClient(config) {
 function searchUsers(client, baseDN) {
   return new Promise((resolve, reject) => {
     const opts = {
-      // ✅ अब disabled users भी आएँगे (filter से disabled filter हटाया)
       filter: "(&(objectClass=user)(objectCategory=person))",
       scope: "sub",
       attributes: [
         "sAMAccountName", "mail", "displayName", "department",
-        "title", "employeeID", "distinguishedName", "userAccountControl"
+        "title", "employeeID", "distinguishedName", "userAccountControl",
+        "manager"   // ✅ ADDED for reportingManager
       ]
     };
     const users = [];
@@ -101,7 +100,6 @@ async function syncADUsers(adminUserId = null) {
 
     const mappedFacilityIds = new Set(Object.values(ouMapping).map(id => Number(id)));
 
-    // ✅ LDAP client with proper error handling
     let client;
     try {
       client = await createClient(config);
@@ -127,17 +125,57 @@ async function syncADUsers(adminUserId = null) {
       const username = adUser.sAMAccountName;
       if (!username) continue;
 
-      // ✅ Skip default admin
+      // ✅ Extract manager name from DN
+      let managerName = null;
+      if (adUser.manager) {
+        const cnMatch = adUser.manager.match(/^CN=([^,]+)/i);
+        if (cnMatch) {
+          managerName = cnMatch[1].trim();
+        }
+      }
+
+      // ✅ Skip default admin – update with audit
       if (defaultAdminUsernames.has(username.toLowerCase())) {
         try {
           const existingAdmin = await User.findOne({ where: { username } });
           if (existingAdmin) {
+            const oldValues = {
+              email: existingAdmin.email,
+              fullName: existingAdmin.fullName,
+              department: existingAdmin.department,
+              designation: existingAdmin.designation,
+              reportingManager: existingAdmin.reportingManager || "",
+            };
             await existingAdmin.update({
               email: adUser.mail || existingAdmin.email,
               fullName: adUser.displayName || existingAdmin.fullName,
               department: adUser.department || existingAdmin.department,
-              designation: adUser.title || existingAdmin.designation
+              designation: adUser.title || existingAdmin.designation,
+              reportingManager: managerName || existingAdmin.reportingManager || "",
             });
+            const newValues = {
+              email: existingAdmin.email,
+              fullName: existingAdmin.fullName,
+              department: existingAdmin.department,
+              designation: existingAdmin.designation,
+              reportingManager: existingAdmin.reportingManager || "",
+            };
+            const changedOld = {}, changedNew = {};
+            Object.keys(oldValues).forEach(key => {
+              if (oldValues[key] !== newValues[key]) {
+                changedOld[key] = oldValues[key];
+                changedNew[key] = newValues[key];
+              }
+            });
+            if (Object.keys(changedOld).length > 0) {
+              changedOld.Username = existingAdmin.username;
+              changedNew.Username = existingAdmin.username;
+              await auditHelper(
+                "USER", existingAdmin.id, "UPDATED_BY_AD_SYNC",
+                changedOld, changedNew, null, null,
+                "Admin user updated by AD sync"
+              );
+            }
           }
         } catch (err) {
           console.error(`Admin update failed for ${username}:`, err.message);
@@ -178,7 +216,7 @@ async function syncADUsers(adminUserId = null) {
         continue;
       }
 
-      // ✅ Case 2: Active user – create or update with try-catch per user
+      // ✅ Case 2: Active user – create or update with audit
       try {
         if (!existingUser) {
           let employeeId = adUser.employeeID;
@@ -194,8 +232,10 @@ async function syncADUsers(adminUserId = null) {
             designation: adUser.title || "",
             domainUserId: username,
             passwordHash: null,
-            isActive: true
+            isActive: true,
+            reportingManager: managerName || null,
           });
+
           if (defaultRole) await user.addRole(defaultRole);
 
           if (ouMapping && Object.keys(ouMapping).length > 0) {
@@ -210,16 +250,62 @@ async function syncADUsers(adminUserId = null) {
               await user.setFacilities(adminFacilities);
             }
           }
+
+          // ✅ Audit for creation
+          await auditHelper(
+            "USER", user.id, "CREATED_BY_AD_SYNC",
+            null,
+            {
+              Username: user.username,
+              "Full Name": user.fullName,
+              Email: user.email,
+              Department: user.department,
+              Designation: user.designation,
+              "Reporting Manager": user.reportingManager || "",
+            },
+            null,
+            null,
+            "User created by AD sync"
+          );
+
           count++;
         } else {
-          await existingUser.update({
-            email: adUser.mail || existingUser.email,
+          const oldValues = {
+            fullName: existingUser.fullName,
+            email: existingUser.email,
+            department: existingUser.department,
+            designation: existingUser.designation,
+            reportingManager: existingUser.reportingManager || "",
+          };
+          const newValues = {
             fullName: adUser.displayName || existingUser.fullName,
+            email: adUser.mail || existingUser.email,
             department: adUser.department || existingUser.department,
             designation: adUser.title || existingUser.designation,
-            isActive: true
-          });
+            reportingManager: managerName || existingUser.reportingManager || "",
+          };
 
+          await existingUser.update(newValues);
+
+          // ✅ Audit update if any field changed
+          const changedOld = {}, changedNew = {};
+          Object.keys(oldValues).forEach(key => {
+            if (oldValues[key] !== newValues[key]) {
+              changedOld[key] = oldValues[key];
+              changedNew[key] = newValues[key];
+            }
+          });
+          if (Object.keys(changedOld).length > 0) {
+            changedOld.Username = existingUser.username;
+            changedNew.Username = existingUser.username;
+            await auditHelper(
+              "USER", existingUser.id, "UPDATED_BY_AD_SYNC",
+              changedOld, changedNew, null, null,
+              "User updated by AD sync"
+            );
+          }
+
+          // Facility mapping logic
           if (ouMapping && Object.keys(ouMapping).length > 0) {
             const desiredFacilityId = ouName ? Number(ouMapping[ouName]) : null;
             const userFacs = await existingUser.getFacilities();
@@ -241,14 +327,12 @@ async function syncADUsers(adminUserId = null) {
           }
         }
       } catch (err) {
-        // ✅ Catch and log any Sequelize error per user – continue with next
         console.error(`Failed to sync user ${username}:`, err.message);
         if (err.name === "SequelizeValidationError") {
           const errors = err.errors.map(e => `${e.path}: ${e.message}`).join(', ');
           console.error(`Validation errors: ${errors}`);
         } else if (err.name === "SequelizeUniqueConstraintError") {
           console.error(`Duplicate key: ${err.fields ? Object.keys(err.fields).join(', ') : 'unknown'}`);
-          // Optionally, you could attempt to update existing user or skip
         }
       }
     }

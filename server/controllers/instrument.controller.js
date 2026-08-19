@@ -173,3 +173,13 @@ exports.delete = async (req, res) => {
     res.status(500).send({ message: error.message });
   }
 };
+
+exports.downloadSampleCsv = async (req, res) => {
+  const csvContent =
+    "Instrument ID,Asset Code,Instrument Type,Make,Model,Serial Number,OEM Details,Status,Current Location,Department,Connection Status,Application,Facility\n" +
+    "INS001,AST001,Chromatography,Waters,HPLC,SN123,\"{}\",ACTIVE,Lab1,,Networked,,,\n" +
+    "INS002,AST002,Spectroscopy,Agilent,Cary 60,SN456,\"{}\",ACTIVE,Lab2,,Standalone,,,\n";
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", "attachment; filename=sample_instruments.csv");
+  res.send(csvContent);
+};

@@ -5,6 +5,7 @@ const getOne = (id) => API.get(`/instruments/${id}`);
 const create = (data) => API.post('/instruments', data);
 const update = (id, data) => API.put(`/instruments/${id}`, data);
 const remove = (id) => API.delete(`/instruments/${id}`);
+const downloadSampleCsv = () => API.get('/instruments/sample-csv', { responseType: 'blob' });
 
-const instrumentService = { getAll, getOne, create, update, remove };
+const instrumentService = { getAll, getOne, create, update, remove, downloadSampleCsv };
 export default instrumentService;

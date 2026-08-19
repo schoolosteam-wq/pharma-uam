@@ -6,7 +6,7 @@ const sequelize = new Sequelize(dbConfig.DB, dbConfig.USER, dbConfig.PASSWORD, {
   port: dbConfig.PORT,
   dialect: dbConfig.dialect,
   pool: dbConfig.pool,
-  logging: false
+  logging: false,
 });
 
 const db = {};
@@ -40,14 +40,12 @@ db.WorkflowHistory = require("./workflowHistory.model")(sequelize, Sequelize);
 db.UserFacility = require("./userFacility.model")(sequelize, Sequelize);
 db.UserApplicationRole = require("./userApplicationRole.model")(sequelize, Sequelize);
 db.UserApplicationGroup = require("./userApplicationGroup.model")(sequelize, Sequelize);
-db.ReportTemplate = require("./reportTemplate.model")(sequelize, Sequelize);
-
-// ✅ New model: ApplicationAdminGroup
 db.ApplicationAdminGroup = require("./applicationAdminGroup.model")(sequelize, Sequelize);
-
-// नीचे दो लाइनें अभी ज़रूरी नहीं, Phase 4 में आएँगी – कमेंट कर दें
 db.ActiveUserList = require("./activeUserList.model")(sequelize, Sequelize);
-// db.LogoSetting = require("./logoSetting.model")(sequelize, Sequelize);
+db.BulkUploadLog = require("./bulkUploadLog.model")(sequelize, Sequelize);
+db.BulkUploadLogDetail = require("./bulkUploadLogDetail.model")(sequelize, Sequelize);
+db.PasswordHistory = require("./passwordHistory.model")(sequelize, Sequelize);
+db.ReportTemplate = require("./reportTemplate.model")(sequelize, Sequelize);
 
 // ---------- Associations ----------
 
@@ -56,10 +54,18 @@ db.Facility.hasMany(db.Facility, { as: "children", foreignKey: "parentId" });
 db.Facility.belongsTo(db.Facility, { as: "parent", foreignKey: "parentId" });
 
 // User ↔ Facility (many‑to‑many)
-db.User.belongsToMany(db.Facility, { through: db.UserFacility, foreignKey: "userId", as: "facilities" });
-db.Facility.belongsToMany(db.User, { through: db.UserFacility, foreignKey: "facilityId", as: "users" });
+db.User.belongsToMany(db.Facility, {
+  through: db.UserFacility,
+  foreignKey: "userId",
+  as: "facilities",
+});
+db.Facility.belongsToMany(db.User, {
+  through: db.UserFacility,
+  foreignKey: "facilityId",
+  as: "users",
+});
 
-// Legacy column (not used actively)
+// Legacy column (facilityId on user)
 db.User.belongsTo(db.Facility, { foreignKey: "facilityId", as: "primaryFacility" });
 
 // User ↔ Role
@@ -77,23 +83,45 @@ db.Permission.belongsTo(db.Role, { foreignKey: "roleId" });
 // AuditTrail ↔ User
 db.AuditTrail.belongsTo(db.User, { foreignKey: "changedBy", as: "changedByUser" });
 
-// Application, Instrument, Computer ↔ Facility
+// Application, Instrument, Computer ↔ Facility (facility)
 db.Application.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
 db.Instrument.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
 db.Computer.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
 db.Request.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
 
-// Instrument ↔ Application
+// ========== FIX: Department associations (alias changed to "departmentFacility") ==========
+db.Application.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
+db.Instrument.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
+db.Computer.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
+db.User.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
+
+// Instrument ↔ Application (belongsTo)
 db.Instrument.belongsTo(db.Application, { foreignKey: "applicationId", as: "application" });
 db.Application.hasMany(db.Instrument, { foreignKey: "applicationId" });
 
 // Computer ↔ Instrument (many‑to‑many)
-db.Computer.belongsToMany(db.Instrument, { through: db.ComputerInstrument, foreignKey: "computerId" });
-db.Instrument.belongsToMany(db.Computer, { through: db.ComputerInstrument, foreignKey: "instrumentId" });
+db.Computer.belongsToMany(db.Instrument, {
+  through: db.ComputerInstrument,
+  foreignKey: "computerId",
+  as: "instruments",
+});
+db.Instrument.belongsToMany(db.Computer, {
+  through: db.ComputerInstrument,
+  foreignKey: "instrumentId",
+  as: "computers",
+});
 
 // Computer ↔ Application (many‑to‑many)
-db.Computer.belongsToMany(db.Application, { through: db.ComputerApplication, foreignKey: "computerId" });
-db.Application.belongsToMany(db.Computer, { through: db.ComputerApplication, foreignKey: "applicationId" });
+db.Computer.belongsToMany(db.Application, {
+  through: db.ComputerApplication,
+  foreignKey: "computerId",
+  as: "applications",
+});
+db.Application.belongsToMany(db.Computer, {
+  through: db.ComputerApplication,
+  foreignKey: "applicationId",
+  as: "computers",
+});
 
 // Request associations
 db.Request.belongsTo(db.User, { as: "requester", foreignKey: "requesterId" });
@@ -102,61 +130,63 @@ db.Request.hasMany(db.RequestDocument, { foreignKey: "requestId", as: "documents
 db.Request.hasMany(db.WorkflowHistory, { foreignKey: "requestId", as: "workflowHistories" });
 db.Request.belongsTo(db.Request, { as: "parentRequest", foreignKey: "parentRequestId" });
 
-// ---------- नए Associations (Application‑specific Roles/Groups) ----------
+// Application‑specific roles/groups
 db.Application.hasMany(db.ApplicationRole, { foreignKey: "applicationId", as: "applicationRoles" });
 db.ApplicationRole.belongsTo(db.Application, { foreignKey: "applicationId" });
 
 db.Application.hasMany(db.ApplicationGroup, { foreignKey: "applicationId", as: "applicationGroups" });
 db.ApplicationGroup.belongsTo(db.Application, { foreignKey: "applicationId" });
-// ---------- User ↔ ApplicationRole/Group (many‑to‑many) ----------
+
+// User ↔ ApplicationRole/Group (many‑to‑many)
 db.User.belongsToMany(db.ApplicationRole, {
   through: db.UserApplicationRole,
   foreignKey: "userId",
-  as: "applicationRoles"
+  as: "applicationRoles",
 });
 db.ApplicationRole.belongsToMany(db.User, {
   through: db.UserApplicationRole,
   foreignKey: "applicationRoleId",
-  as: "users"
+  as: "users",
 });
 
 db.User.belongsToMany(db.ApplicationGroup, {
   through: db.UserApplicationGroup,
   foreignKey: "userId",
-  as: "applicationGroups"
+  as: "applicationGroups",
 });
 db.ApplicationGroup.belongsToMany(db.User, {
   through: db.UserApplicationGroup,
   foreignKey: "applicationGroupId",
-  as: "users"
+  as: "users",
 });
 
-// ---------- Direct belongsTo for query includes ----------
+// Direct belongsTo for query includes
 db.UserApplicationRole.belongsTo(db.ApplicationRole, { foreignKey: "applicationRoleId" });
 db.UserApplicationGroup.belongsTo(db.ApplicationGroup, { foreignKey: "applicationGroupId" });
 
-// ✅ Application ↔ Group (many‑to‑many) for admin
+// Application ↔ Group (admin groups)
 db.Application.belongsToMany(db.Group, {
   through: db.ApplicationAdminGroup,
   foreignKey: "applicationId",
   otherKey: "groupId",
-  as: "adminGroups"
+  as: "adminGroups",
 });
 db.Group.belongsToMany(db.Application, {
   through: db.ApplicationAdminGroup,
   foreignKey: "groupId",
   otherKey: "applicationId",
-  as: "adminApplications"
+  as: "adminApplications",
 });
 
+// ActiveUserList & WorkflowHistory
 db.ActiveUserList.belongsTo(db.User, { foreignKey: "userId" });
 db.WorkflowHistory.belongsTo(db.User, { as: "actionByUser", foreignKey: "actionBy" });
 
-db.PasswordHistory = require("./passwordHistory.model")(sequelize, Sequelize);
+// PasswordHistory
 db.PasswordHistory.belongsTo(db.User, { foreignKey: "userId" });
 db.User.hasMany(db.PasswordHistory, { foreignKey: "userId" });
 
-// Association
+// ApplicationActivity
 db.Application.hasMany(db.ApplicationActivity, { foreignKey: "applicationId", as: "applicationActivities" });
 db.ApplicationActivity.belongsTo(db.Application, { foreignKey: "applicationId" });
 
@@ -164,7 +194,12 @@ db.ApplicationActivity.belongsTo(db.Application, { foreignKey: "applicationId" }
 db.ApplicationAdminGroup.belongsTo(db.Group, { foreignKey: "groupId" });
 db.ApplicationAdminGroup.belongsTo(db.Application, { foreignKey: "applicationId" });
 
+// ReportTemplate
 db.ReportTemplate.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
 db.Facility.hasMany(db.ReportTemplate, { foreignKey: "facilityId", as: "reportTemplates" });
+
+// Bulk Upload Logs
+db.BulkUploadLog.hasMany(db.BulkUploadLogDetail, { foreignKey: "logId", as: "details" });
+db.BulkUploadLogDetail.belongsTo(db.BulkUploadLog, { foreignKey: "logId" });
 
 module.exports = db;

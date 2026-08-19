@@ -301,7 +301,9 @@ exports.listForRequest = async (req, res) => {
 };
 
 exports.downloadSampleCsv = async (req, res) => {
-  const csvContent = "name,manufacturer,versionNo,oemContact,status,roles,groups\nEmpower,Waters,3.5,contact@waters.com,ACTIVE,\"Administrator,Reviewer,Analyst\",\"Group1,Group2\"";
+  const csvContent =
+    "Application Name,Version,Manufacturer,OEM Contact,Status,Facility,Department,Application Owner,GAMP Category,Validated,ERES Applicable,Last Periodic Review Date,Database Type,Audit Trail Enabled,Application Criticality,Instrument IDs,Computer Hostnames,roles,groups\n" +
+    "Empower,3.0,Waters,contact@waters.com,ACTIVE,,,John Doe,1,Yes,Yes,2026-08-01,Oracle,Yes,High,\"INS001,INS002\",\"PC001,PC002\",\"Administrator,Reviewer\",\"Group1\"\n";
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", "attachment; filename=sample_applications.csv");
   res.send(csvContent);

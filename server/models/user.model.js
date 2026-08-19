@@ -33,6 +33,11 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING(150),
       allowNull: false
     },
+    departmentId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "facilities", key: "id" },
+    },
     designation: {
       type: DataTypes.STRING(150),
       allowNull: false
