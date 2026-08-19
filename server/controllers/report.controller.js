@@ -48,7 +48,9 @@ function buildReportHTML({
   columnsMap,
   selectedColumns,
 }) {
-  // Placeholder replacement helper
+  // --------------------------------------------
+  // 1. Helper: Replace placeholders in HTML
+  // --------------------------------------------
   const replacePlaceholders = (html, placeholders) => {
     if (!html) return "";
     let result = html;
@@ -58,6 +60,9 @@ function buildReportHTML({
     return result;
   };
 
+  // --------------------------------------------
+  // 2. Logo & common variables
+  // --------------------------------------------
   const logoPath = template.logoPath
     ? path.join(__dirname, "..", template.logoPath.replace(/^\/uploads\//, "uploads/"))
     : null;
@@ -70,75 +75,158 @@ function buildReportHTML({
     ? `<img src="data:image/png;base64,${logoBase64}" style="${logoStyle}" />`
     : "";
 
-  const headerStyle = `font-family:${template.headerFontFamily};font-size:${template.headerFontSize}px;color:${template.headerFontColor};font-weight:${template.headerFontWeight};background:${template.headerBackgroundColor};padding:${template.headerPadding}px 30px;border-bottom:2px solid ${template.headerBorderColor};`;
-  const bodyStyle = `font-family:${template.bodyFontFamily};font-size:${template.bodyFontSize}px;color:${template.bodyFontColor};font-weight:${template.bodyFontWeight};`;
-  const footerStyle = `font-family:${template.footerFontFamily};font-size:${template.footerFontSize}px;color:${template.footerFontColor};font-weight:${template.footerFontWeight};background:${template.footerBackgroundColor};padding:${template.footerPadding}px 30px;border-top:1px solid ${template.footerBorderColor};`;
-  const tableHeaderStyle = `background:${template.tableHeaderBackgroundColor};color:${template.tableHeaderTextColor};`;
-  const tableBorderColor = template.tableBorderColor;
-
   const printedBy = currentUser?.fullName || currentUser?.username || "System";
   const printedDateTime = new Date().toLocaleString();
-  const footerAlignStyle =
-    template.footerTextAlignment === "CENTER"
-      ? "text-align:center;"
-      : template.footerTextAlignment === "RIGHT"
-      ? "text-align:right;"
-      : "text-align:left;";
 
-  // Prepare placeholders
-  const placeholders = {
-    companyName: template.companyName || applicationName || "Pharma UAM",
-    reportTitle: template.reportTitle || "Report",
-    logo: logoHtml,
-    printedBy: printedBy,
-    printedDateTime: printedDateTime,
-    footerText: template.footerText,
-    pageNumber: template.showPageNumber ? "Page 1 of 1" : "",
-    preparedByLabel: template.preparedByLabel || "Prepared By",
-    reviewedByLabel: template.reviewedByLabel || "Reviewed By",
-    approvedByLabel: template.approvedByLabel || "Approved By",
+  // --------------------------------------------
+  // 3. Render element for layout-based items
+  // --------------------------------------------
+  const renderElement = (key, item) => {
+    switch (key) {
+      case "companyName":
+        return template.companyName || applicationName || "Pharma UAM";
+      case "reportTitle":
+        return template.reportTitle || "Report";
+      case "logo":
+        return logoHtml;
+      case "footerText":
+        return template.footerText || "";
+      case "printedBy":
+        return `Printed By: ${printedBy}`;
+      case "printedDateTime":
+        return printedDateTime;
+      case "pageNumber":
+        return template.showPageNumber !== false ? "Page 1 of 1" : "";
+      case "preparedBy":
+        return template.showPreparedBy ? `${template.preparedByLabel || "Prepared By"}: _________________` : "";
+      case "reviewedBy":
+        return template.showReviewedBy ? `${template.reviewedByLabel || "Reviewed By"}: _________________` : "";
+      case "approvedBy":
+        return template.showApprovedBy ? `${template.approvedByLabel || "Approved By"}: _________________` : "";
+      default:
+        return "";
+    }
   };
 
-  // Header
+  // --------------------------------------------
+  // 4. Build Header
+  // --------------------------------------------
   let headerHtml;
-  if (template.headerTemplateHtml) {
+  const headerLayout = template.headerLayout; // expected array: [{ key, alignment, order }]
+  if (Array.isArray(headerLayout) && headerLayout.length > 0) {
+    const sortedItems = [...headerLayout].sort((a, b) => (a.order || 0) - (b.order || 0));
+    const itemsHtml = sortedItems
+      .map((item) => {
+        const content = renderElement(item.key, item);
+        if (!content) return "";
+        const align = (item.alignment || "LEFT").toLowerCase();
+        return `<div style="text-align:${align}; margin-bottom:5px;">${content}</div>`;
+      })
+      .join("");
+    headerHtml = `<div style="padding:${template.headerPadding || 10}px 30px; background:${template.headerBackgroundColor || '#ffffff'}; border-bottom:2px solid ${template.headerBorderColor || '#3498db'}; font-family:${template.headerFontFamily || 'Arial'}; font-size:${template.headerFontSize || 20}px; color:${template.headerFontColor || '#000000'}; font-weight:${template.headerFontWeight || 'bold'};">${itemsHtml}</div>`;
+  } else if (template.headerTemplateHtml) {
+    // WYSIWYG HTML template – replace placeholders
+    const placeholders = {
+      companyName: template.companyName || applicationName || "Pharma UAM",
+      reportTitle: template.reportTitle || "Report",
+      logo: logoHtml,
+      printedBy: printedBy,
+      printedDateTime: printedDateTime,
+      footerText: template.footerText,
+      pageNumber: template.showPageNumber ? "Page 1 of 1" : "",
+      preparedByLabel: template.preparedByLabel || "Prepared By",
+      reviewedByLabel: template.reviewedByLabel || "Reviewed By",
+      approvedByLabel: template.approvedByLabel || "Approved By",
+    };
     headerHtml = replacePlaceholders(template.headerTemplateHtml, placeholders);
   } else {
+    // Fallback: original table-based header (companyName left, reportTitle below, logo right)
     headerHtml = `
-      <table style="width:100%; border-collapse:collapse; background:${template.headerBackgroundColor}; padding:${template.headerPadding}px 30px; border-bottom:2px solid ${template.headerBorderColor};">
+      <table style="width:100%; border-collapse:collapse; background:${template.headerBackgroundColor || '#ffffff'}; padding:${template.headerPadding || 10}px 30px; border-bottom:2px solid ${template.headerBorderColor || '#3498db'};">
         <tr>
-          <td style="vertical-align:top; text-align:left; padding:${template.headerPadding}px;">
-            <div style="font-size:${template.headerFontSize}px; font-weight:${template.headerFontWeight}; color:${template.headerFontColor}; font-family:${template.headerFontFamily}; margin-bottom:5px;">
+          <td style="vertical-align:top; text-align:left; padding:${template.headerPadding || 10}px;">
+            <div style="font-size:${template.headerFontSize || 20}px; font-weight:${template.headerFontWeight || 'bold'}; color:${template.headerFontColor || '#000000'}; font-family:${template.headerFontFamily || 'Arial'}; margin-bottom:5px;">
               ${template.companyName || applicationName || "Pharma UAM"}
             </div>
-            ${template.reportTitle ? `<div style="font-size:${Math.max(template.headerFontSize - 4, 10)}px; font-weight:${template.headerFontWeight}; color:${template.headerFontColor}; font-family:${template.headerFontFamily};">${template.reportTitle}</div>` : ""}
+            ${template.reportTitle ? `<div style="font-size:${Math.max(template.headerFontSize - 4, 10)}px; font-weight:${template.headerFontWeight || 'bold'}; color:${template.headerFontColor || '#000000'}; font-family:${template.headerFontFamily || 'Arial'};">${template.reportTitle}</div>` : ""}
           </td>
-          <td style="vertical-align:middle; text-align:${template.logoAlignment.toLowerCase()}; padding:${template.headerPadding}px;">
+          <td style="vertical-align:middle; text-align:${(template.logoAlignment || 'RIGHT').toLowerCase()}; padding:${template.headerPadding || 10}px;">
             ${logoHtml}
           </td>
         </tr>
       </table>`;
   }
 
-  // Footer
+  // --------------------------------------------
+  // 5. Build Footer
+  // --------------------------------------------
   let footerHtml;
-  if (template.footerTemplateHtml) {
+  const footerLayout = template.footerLayout;
+  if (Array.isArray(footerLayout) && footerLayout.length > 0) {
+    const sortedItems = [...footerLayout].sort((a, b) => (a.order || 0) - (b.order || 0));
+    const itemsHtml = sortedItems
+      .map((item) => {
+        const content = renderElement(item.key, item);
+        if (!content) return "";
+        const align = (item.alignment || "LEFT").toLowerCase();
+        return `<div style="text-align:${align}; margin-bottom:5px;">${content}</div>`;
+      })
+      .join("");
+    footerHtml = `<div style="padding:${template.footerPadding || 10}px 30px; background:${template.footerBackgroundColor || '#ffffff'}; border-top:1px solid ${template.footerBorderColor || '#dddddd'}; font-family:${template.footerFontFamily || 'Arial'}; font-size:${template.footerFontSize || 12}px; color:${template.footerFontColor || '#7f8c8d'}; font-weight:${template.footerFontWeight || 'normal'};">${itemsHtml}</div>`;
+  } else if (template.footerTemplateHtml) {
+    const placeholders = {
+      companyName: template.companyName || applicationName || "Pharma UAM",
+      reportTitle: template.reportTitle || "Report",
+      logo: logoHtml,
+      printedBy: printedBy,
+      printedDateTime: printedDateTime,
+      footerText: template.footerText,
+      pageNumber: template.showPageNumber ? "Page 1 of 1" : "",
+      preparedByLabel: template.preparedByLabel || "Prepared By",
+      reviewedByLabel: template.reviewedByLabel || "Reviewed By",
+      approvedByLabel: template.approvedByLabel || "Approved By",
+    };
     footerHtml = replacePlaceholders(template.footerTemplateHtml, placeholders);
-  } else {
+    } else {
+    // Simplified fallback footer with optional approval table
+    const footerSopText = template.footerText || "";
+    const printedBy = currentUser?.fullName || currentUser?.username || "System";
+    const printedDateTime = new Date().toLocaleString();
+    const pageNumberText = template.showPageNumber !== false ? "Page 1 of 1" : "";
+
+    // Approval table (Prepared By, Reviewed By, Approved By) – shown if any enabled
+    const approvalItems = [
+      { show: template.showPreparedBy, label: template.preparedByLabel || "Prepared By" },
+      { show: template.showReviewedBy, label: template.reviewedByLabel || "Reviewed By" },
+      { show: template.showApprovedBy, label: template.approvedByLabel || "Approved By" },
+    ].filter((item) => item.show);
+
+    let approvalTableHtml = "";
+    if (approvalItems.length > 0) {
+      const cells = approvalItems
+        .map((item) => `<td style="text-align:center; padding:5px; border:1px solid ${template.footerBorderColor || '#dddddd'};">${item.label}: _________________</td>`)
+        .join("");
+      approvalTableHtml = `
+        <table style="width:100%; border-collapse:collapse; margin-bottom:8px;">
+          <tr>${cells}</tr>
+        </table>`;
+    }
+
     footerHtml = `
-      <div class="footer" style="${footerStyle} ${footerAlignStyle}">
-        <div>${template.footerText}</div>
-        <div>Printed By: ${printedBy}</div>
-        <div>${printedDateTime}</div>
-        ${template.showPageNumber ? "<div>Page 1 of 1</div>" : ""}
-        <div style="display:flex; gap:20px; justify-content:${template.footerTextAlignment === "CENTER" ? "center" : template.footerTextAlignment === "RIGHT" ? "flex-end" : "flex-start"};">
-          ${template.showPreparedBy ? `<span>${template.preparedByLabel}: _________________</span>` : ""}
-          ${template.showReviewedBy ? `<span>${template.reviewedByLabel}: _________________</span>` : ""}
-          ${template.showApprovedBy ? `<span>${template.approvedByLabel}: _________________</span>` : ""}
+      <div style="padding:${template.footerPadding || 10}px 30px; background:${template.footerBackgroundColor || '#ffffff'}; border-top:1px solid ${template.footerBorderColor || '#dddddd'}; font-family:${template.footerFontFamily || 'Arial'}; font-size:${template.footerFontSize || 12}px; color:${template.footerFontColor || '#7f8c8d'};">
+        ${approvalTableHtml}
+        ${footerSopText ? `<div style="text-align:left; margin-bottom:5px;">${footerSopText}</div>` : ""}
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span>Printed By: ${printedBy} | ${printedDateTime}</span>
+          ${pageNumberText ? `<span>${pageNumberText}</span>` : ""}
         </div>
+        <div style="text-align:center; margin-top:5px;">This report is system generated and does not require signature.</div>
       </div>`;
   }
 
+  // --------------------------------------------
+  // 6. Table Generation
+  // --------------------------------------------
   const headerCells = selectedColumns
     .map((col) => `<th>${columnsMap[col].label}</th>`)
     .join("");
@@ -152,10 +240,16 @@ function buildReportHTML({
     .join("");
 
   const colspan = selectedColumns.length || 1;
+  const bodyStyle = `font-family:${template.bodyFontFamily || 'Arial'}; font-size:${template.bodyFontSize || 12}px; color:${template.bodyFontColor || '#000000'}; font-weight:${template.bodyFontWeight || 'normal'};`;
+  const tableHeaderStyle = `background:${template.tableHeaderBackgroundColor || '#3498db'}; color:${template.tableHeaderTextColor || '#ffffff'};`;
+  const tableBorderColor = template.tableBorderColor || '#dddddd';
 
+  // --------------------------------------------
+  // 7. Final HTML
+  // --------------------------------------------
   const html = `<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>${template.reportTitle}</title>
+<head><meta charset="utf-8"><title>${template.reportTitle || "Report"}</title>
 <style>
   body { ${bodyStyle} margin:0; padding:0; }
   .header { width:100%; }

@@ -42,6 +42,17 @@ const defaultTemplate = {
   orientation: "PORTRAIT",
   headerTemplateHtml: null,
   footerTemplateHtml: null,
+  headerLayout: [
+    { key: "companyName", alignment: "LEFT", order: 1 },
+    { key: "reportTitle", alignment: "LEFT", order: 2 },
+    { key: "logo", alignment: "RIGHT", order: 3 },
+  ],
+  footerLayout: [
+    { key: "footerText", alignment: "LEFT", order: 1 },
+    { key: "printedBy", alignment: "LEFT", order: 2 },
+    { key: "printedDateTime", alignment: "LEFT", order: 3 },
+    { key: "pageNumber", alignment: "RIGHT", order: 4 },
+  ],
 };
 
 async function getEffectiveTemplate(facilityId, reportType = "activeUsers") {

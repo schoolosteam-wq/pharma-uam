@@ -160,6 +160,23 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.JSONB,
         defaultValue: ["srNo", "fullName", "employeeId", "roles", "status"],
       },
+      headerLayout: {
+        type: DataTypes.JSONB,
+        defaultValue: [
+          { key: "companyName", alignment: "LEFT", order: 1 },
+          { key: "reportTitle", alignment: "LEFT", order: 2 },
+          { key: "logo", alignment: "RIGHT", order: 3 },
+        ],
+      },
+      footerLayout: {
+        type: DataTypes.JSONB,
+        defaultValue: [
+          { key: "footerText", alignment: "LEFT", order: 1 },
+          { key: "printedBy", alignment: "LEFT", order: 2 },
+          { key: "printedDateTime", alignment: "LEFT", order: 3 },
+          { key: "pageNumber", alignment: "RIGHT", order: 4 },
+        ],
+      },
       orientation: {
         type: DataTypes.ENUM("PORTRAIT", "LANDSCAPE"),
         defaultValue: "PORTRAIT",
