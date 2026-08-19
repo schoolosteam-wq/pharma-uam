@@ -1,4 +1,5 @@
 const db = require("../models");
+const { Op } = require("sequelize");   // ✅ Added
 const Computer = db.Computer;
 const Instrument = db.Instrument;
 const Application = db.Application;
@@ -40,6 +41,20 @@ exports.create = async (req, res) => {
     }
 
     const { computerMakeModel, serialNumber, ipAddress, status, instrumentIds, applicationIds } = req.body;
+
+    // ========== 🆕 VALIDATION: Check if instruments already linked to another computer ==========
+    if (instrumentIds && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
+      const alreadyLinked = await db.ComputerInstrument.findAll({
+        where: { instrumentId: { [Op.in]: instrumentIds } },
+        attributes: ["instrumentId"],
+      });
+      if (alreadyLinked.length > 0) {
+        return res.status(400).send({
+          message: "Some instruments are already connected to another computer.",
+        });
+      }
+    }
+
     const computer = await Computer.create({
       computerMakeModel, serialNumber, ipAddress, status, facilityId,
       createdBy: req.userId,
@@ -65,12 +80,11 @@ exports.findAll = async (req, res) => {
       ]
     };
 
-    // ✅ Apply facility filter with header support
     query = await applyFacilityFilter(
       query,
       req.userId,
-      "facilityId",                              // Computer model में facilityId column
-      req.headers['x-facility-id']               // Header से specific facility ID
+      "facilityId",
+      req.headers['x-facility-id']
     );
 
     const computers = await Computer.findAll(query);
@@ -127,7 +141,43 @@ exports.update = async (req, res) => {
       computerMakeModel, serialNumber, ipAddress, status, facilityId,
       updatedBy: req.userId,
     });
-    if (instrumentIds !== undefined) await computer.setInstruments(instrumentIds);
+
+    // ========== 🆕 CASCADE ON INACTIVE (ADDED) ==========
+    if (status === "INACTIVE" && computer.status !== "INACTIVE") {
+      // Unlink from applications
+      await db.ComputerApplication.destroy({ where: { computerId: computer.id } });
+      // Unlink from instruments
+      await db.ComputerInstrument.destroy({ where: { computerId: computer.id } });
+      // Audit
+      await auditHelper(
+        "COMPUTER",
+        computer.id,
+        "INACTIVE",
+        { Status: "ACTIVE" },
+        { Status: "INACTIVE", Unlinked: true },
+        req.userId,
+        req.ip,
+        "Computer inactivated – links removed"
+      );
+    }
+
+    // ========== 🆕 VALIDATION: Check instruments in update ==========
+    if (instrumentIds !== undefined) {
+      const alreadyLinked = await db.ComputerInstrument.findAll({
+        where: {
+          instrumentId: { [Op.in]: instrumentIds },
+          computerId: { [Op.ne]: computer.id },
+        },
+        attributes: ["instrumentId"],
+      });
+      if (alreadyLinked.length > 0) {
+        return res.status(400).send({
+          message: "Some instruments are already connected to another computer.",
+        });
+      }
+      await computer.setInstruments(instrumentIds);
+    }
+
     if (applicationIds !== undefined) await computer.setApplications(applicationIds);
     await computer.reload({ include: [{ model: Instrument, as: "instruments" }, { model: Application, as: "applications" }] });
     const newCleanValue = await buildAuditComputerObject(computer);

@@ -14,6 +14,8 @@ import {
 import applicationService from '../../services/applicationService';
 import facilityService from '../../services/facilityService';
 import groupService from '../../services/groupService';
+import instrumentService from '../../services/instrumentService';
+import computerService from '../../services/computerService';   // ✅ ADDED
 import { useNavigate } from 'react-router-dom';
 import { usePermission } from '../../hooks/usePermission';
 import { useAuth } from '../../context/AuthContext';
@@ -38,6 +40,9 @@ const ApplicationList = () => {
   const [facilities, setFacilities] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
+  const [allInstruments, setAllInstruments] = useState([]);
+  const [allComputers, setAllComputers] = useState([]);   // ✅ ADDED
+  const [availableInstruments, setAvailableInstruments] = useState([]);
 
   const { canCreate, canEdit, canDelete } = usePermission();
   const { permissions } = useAuth();
@@ -58,10 +63,12 @@ const ApplicationList = () => {
 
   const fetchDropdowns = async () => {
     try {
-      const [facRes, deptRes, groupRes] = await Promise.all([
+      const [facRes, deptRes, groupRes, instRes, compRes] = await Promise.all([   // ✅ ADDED compRes
         facilityService.getAll(),
         facilityService.getByType('DEPARTMENT'),
         groupService.getAll(),
+        instrumentService.getAll(),
+        computerService.getAll(),   // ✅ ADDED
       ]);
       // Flatten facility tree to get only FACTORY nodes
       const flattenFac = (nodes) => {
@@ -77,6 +84,8 @@ const ApplicationList = () => {
       setFacilities(flattenFac(facRes.data));
       setDepartments(deptRes.data || []);
       setAllGroups(groupRes.data || []);
+      setAllInstruments(instRes.data || []);
+      setAllComputers(compRes.data || []);   // ✅ ADDED
     } catch (error) {
       message.error('Failed to load dropdown data');
     }
@@ -102,6 +111,9 @@ const ApplicationList = () => {
     setGroupsList([]);
     setRoleInput('');
     setGroupInput('');
+    // ✅ Filter instruments not linked to any application
+    setAvailableInstruments(allInstruments.filter(i => !i.applicationId));
+    form.setFieldsValue({ computerIds: [] });   // ✅ ADDED
     setModalVisible(true);
   };
 
@@ -124,11 +136,15 @@ const ApplicationList = () => {
       auditTrailEnabled: record.auditTrailEnabled,
       applicationCriticality: record.applicationCriticality || undefined,
       adminGroups: record.adminGroups?.map(g => g.id) || [],
+      instrumentIds: record.instruments?.map(i => i.id) || [],
+      computerIds: record.computers?.map(c => c.id) || [],   // ✅ ADDED
     });
     setRolesList(record.roles || []);
     setGroupsList(record.groups || []);
     setRoleInput('');
     setGroupInput('');
+    // ✅ Filter instruments not linked to any application OR already linked to this application
+    setAvailableInstruments(allInstruments.filter(i => !i.applicationId || i.applicationId === record.id));
     setModalVisible(true);
   };
 
@@ -164,6 +180,8 @@ const ApplicationList = () => {
         roles: rolesList,
         groups: groupsList,
         adminGroups: values.adminGroups || [],
+        instrumentIds: values.instrumentIds || [],
+        computerIds: values.computerIds || [],   // ✅ ADDED
       };
       if (editing) {
         await applicationService.update(editing.id, payload);
@@ -457,6 +475,44 @@ const ApplicationList = () => {
                 >
                   {allGroups.map(g => (
                     <Option key={g.id} value={g.id}>{g.groupName}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* ✅ NEW: Linked Instruments */}
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item name="instrumentIds" label="Linked Instruments">
+                <Select
+                  mode="multiple"
+                  placeholder="Select instruments to link"
+                  allowClear
+                >
+                  {availableInstruments.map(i => (
+                    <Option key={i.id} value={i.id}>
+                      {i.instrumentId} - {i.make} {i.model}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* ✅ NEW: Linked Computers */}
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item name="computerIds" label="Linked Computers">
+                <Select
+                  mode="multiple"
+                  placeholder="Select computers to link"
+                  allowClear
+                >
+                  {allComputers.map(c => (
+                    <Option key={c.id} value={c.id}>
+                      {c.hostname} - {c.computerMakeModel}
+                    </Option>
                   ))}
                 </Select>
               </Form.Item>

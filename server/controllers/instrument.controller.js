@@ -127,6 +127,28 @@ exports.update = async (req, res) => {
       make, model, serialNumber, oemDetails, status, applicationId, currentLocation, facilityId,
       updatedBy: req.userId,
     });
+
+    // ========== 🆕 CASCADE ON RETIRED/TRANSFERRED (ADDED) ==========
+    if ((data.status === "RETIRED" || data.status === "TRANSFERRED") && instrument.status !== data.status) {
+      // Unlink from computers
+      await db.ComputerInstrument.destroy({ where: { instrumentId: instrument.id } });
+      // Unlink from application (set applicationId null)
+      if (instrument.applicationId) {
+        await instrument.update({ applicationId: null });
+      }
+      // Audit
+      await auditHelper(
+        "INSTRUMENT",
+        instrument.id,
+        data.status,
+        { Status: "ACTIVE" },
+        { Status: data.status, Unlinked: true },
+        req.userId,
+        req.ip,
+        `Instrument ${data.status.toLowerCase()} – links removed`
+      );
+    }
+
     if (computerIds !== undefined) {
       await instrument.setComputers(computerIds);
     }

@@ -33,6 +33,7 @@ const applicationAdminGroupRoutes = require("./routes/applicationAdminGroup.rout
 const roleRoutes = require("./routes/role.routes");
 const groupRoutes = require("./routes/group.routes");
 const reportTemplateRoutes = require("./routes/reportTemplate.routes");
+const bulkUploadLogRoutes = require("./routes/bulkUploadLog.routes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/facilities", facilityRoutes);
@@ -57,6 +58,7 @@ app.use("/api/applications", applicationAdminGroupRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/report-templates", reportTemplateRoutes);
+app.use("/api/bulk-upload-logs", bulkUploadLogRoutes);
 
 // Health check
 app.get("/", (req, res) => {

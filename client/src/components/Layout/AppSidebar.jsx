@@ -42,8 +42,8 @@ const AppSidebar = () => {
       icon: <BankOutlined />,
       label: 'Organization',
       children: [
-        { key: '/facilities/type/COMPANY', label: 'Companies' },
-        { key: '/facilities/type/FACTORY', label: 'Factories' },
+        { key: '/facilities/type/COMPANY', label: 'Company' },
+        { key: '/facilities/type/FACTORY', label: 'Factory' },
         { key: '/facilities/type/UNIT', label: 'Units' },
         { key: '/facilities/type/DEPARTMENT', label: 'Departments' },
       ],
@@ -53,9 +53,9 @@ const AppSidebar = () => {
       icon: <AppstoreOutlined />,
       label: 'Master Data',
       children: [
-        { key: '/applications', label: 'Applications' },
         { key: '/instruments', label: 'Instruments' },
         { key: '/computers', label: 'Computers' },
+        { key: '/applications', label: 'Applications' },
         ...(isAdmin()
           ? [{ key: '/active-users/csv', label: 'Active User Bulk Upload' }]
           : []),

@@ -1,15 +1,15 @@
 const db = require("../models");
+const { Op } = require("sequelize");
 const Application = db.Application;
 const ApplicationRole = db.ApplicationRole;
 const ApplicationGroup = db.ApplicationGroup;
 const Instrument = db.Instrument;
 const Computer = db.Computer;
 const Facility = db.Facility;
-const Group = db.Group;   // ✅ Already imported
+const Group = db.Group;
 const { auditHelper } = require("../utils/auditHelper");
 const { getUserFacilities, applyFacilityFilter } = require("../utils/facilityFilter");
 
-// ✅ Updated to include adminGroupsArr
 async function buildAuditAppObject(app, rolesArr, groupsArr, adminGroupsArr) {
   const facility = app.facilityId ? await Facility.findByPk(app.facilityId) : null;
   return {
@@ -38,7 +38,6 @@ exports.create = async (req, res) => {
       }
     }
 
-    // ✅ फैक्ट्री प्रकार की जाँच करें (यदि facilityId मौजूद है)
     if (facilityId) {
       const facility = await Facility.findByPk(facilityId);
       if (!facility || facility.type !== "FACTORY") {
@@ -46,8 +45,22 @@ exports.create = async (req, res) => {
       }
     }
 
-    // ✅ Destructure adminGroups as well
-    const { roles, groups, adminGroups, ...data } = req.body;
+    // ✅ Destructure all non-model fields
+    const { roles, groups, adminGroups, instrumentIds, computerIds, ...data } = req.body;
+
+    // ✅ Validation: Check instrumentIds duplication
+    if (instrumentIds && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
+      const linkedInstruments = await Instrument.findAll({
+        where: { id: { [Op.in]: instrumentIds }, applicationId: { [Op.ne]: null } },
+        attributes: ["id", "instrumentId"],
+      });
+      if (linkedInstruments.length > 0) {
+        return res.status(400).send({
+          message: `Following instruments already assigned to another application: ${linkedInstruments.map(i => i.instrumentId).join(", ")}`,
+        });
+      }
+    }
+
     const app = await Application.create({
       name: data.name,
       manufacturer: data.manufacturer || null,
@@ -55,6 +68,15 @@ exports.create = async (req, res) => {
       oemContact: data.oemContact || null,
       status: data.status || "ACTIVE",
       facilityId: facilityId || null,
+      departmentId: data.departmentId || null,
+      applicationOwner: data.applicationOwner || null,
+      gampCategory: data.gampCategory || null,
+      validated: data.validated ?? false,
+      eresApplicable: data.eresApplicable ?? false,
+      lastPeriodicReviewDate: data.lastPeriodicReviewDate || null,
+      databaseType: data.databaseType || null,
+      auditTrailEnabled: data.auditTrailEnabled ?? false,
+      applicationCriticality: data.applicationCriticality || null,
       createdBy: req.userId,
     });
 
@@ -67,20 +89,39 @@ exports.create = async (req, res) => {
       await ApplicationGroup.bulkCreate(groupRecords);
     }
 
-    // ✅ Save admin groups
     if (adminGroups && Array.isArray(adminGroups)) {
       const groupRecords = await Group.findAll({ where: { id: adminGroups } });
       await app.setAdminGroups(groupRecords);
     }
 
-    await app.reload({ include: [{ model: Group, as: "adminGroups" }] });
+    // ✅ Link instruments if provided
+    if (instrumentIds && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
+      await Instrument.update(
+        { applicationId: app.id },
+        { where: { id: { [Op.in]: instrumentIds } } }
+      );
+    }
 
-    // ✅ Pass adminGroups to audit
+    // ✅ Link computers if provided
+    if (computerIds && Array.isArray(computerIds) && computerIds.length > 0) {
+      const computers = await Computer.findAll({ where: { id: { [Op.in]: computerIds } } });
+      await app.setComputers(computers);
+    }
+
+    await app.reload({
+      include: [
+        { model: Group, as: "adminGroups" },
+        { model: Instrument, as: "instruments" },
+        { model: Computer, as: "computers" },
+      ],
+    });
+
     const cleanNewValue = await buildAuditAppObject(app, roles, groups, adminGroups);
     await auditHelper("APPLICATION", app.id, "CREATED", null, cleanNewValue,
                       req.userId, req.ip, "Application created");
     res.status(201).send(app);
   } catch (error) {
+    console.error("Application create error:", error);
     res.status(500).send({ message: error.message });
   }
 };
@@ -94,35 +135,35 @@ exports.findAll = async (req, res) => {
         { model: Instrument, as: "instruments", attributes: ["id"] },
         { model: Computer, as: "computers", attributes: ["id"] },
         { model: Facility, as: "facility", attributes: ["id", "name"] },
-        // ✅ Include adminGroups
         {
           model: Group,
           as: "adminGroups",
           attributes: ["id", "groupName"],
-          through: { attributes: [] }
-        }
+          through: { attributes: [] },
+        },
       ],
     };
 
-    // ✅ Apply facility filter – uses req.userId and optional x-facility-id header
     query = await applyFacilityFilter(
       query,
       req.userId,
       "facilityId",
-      req.headers['x-facility-id']
+      req.headers["x-facility-id"]
     );
 
     const apps = await Application.findAll(query);
-    
-    const result = apps.map(app => ({
+
+    const result = apps.map((app) => ({
       ...app.toJSON(),
       instrumentCount: app.instruments.length,
       computerCount: app.computers.length,
-      roles: app.applicationRoles.map(r => r.roleName),
-      groups: app.applicationGroups.map(g => g.groupName),
-      adminGroups: app.adminGroups ? app.adminGroups.map(g => ({ id: g.id, groupName: g.groupName })) : [],
+      roles: app.applicationRoles.map((r) => r.roleName),
+      groups: app.applicationGroups.map((g) => g.groupName),
+      adminGroups: app.adminGroups
+        ? app.adminGroups.map((g) => ({ id: g.id, groupName: g.groupName }))
+        : [],
     }));
-    
+
     res.send(result);
   } catch (error) {
     console.error("Error fetching applications:", error);
@@ -139,13 +180,12 @@ exports.findOne = async (req, res) => {
         { model: Instrument, as: "instruments", attributes: ["id", "make", "model", "serialNumber"] },
         { model: Computer, as: "computers", through: { attributes: [] }, attributes: ["id", "computerMakeModel", "serialNumber"] },
         { model: Facility, as: "facility", attributes: ["id", "name"] },
-        // ✅ Include adminGroups
         {
           model: Group,
           as: "adminGroups",
           attributes: ["id", "groupName"],
-          through: { attributes: [] }
-        }
+          through: { attributes: [] },
+        },
       ],
     });
     if (!app) return res.status(404).send({ message: "Application not found" });
@@ -167,20 +207,37 @@ exports.update = async (req, res) => {
         { model: ApplicationRole, as: "applicationRoles" },
         { model: ApplicationGroup, as: "applicationGroups" },
         { model: Facility, as: "facility" },
-        { model: Group, as: "adminGroups", attributes: ["id", "groupName"] }
-      ]
+        { model: Group, as: "adminGroups", attributes: ["id", "groupName"] },
+      ],
     });
     if (!app) return res.status(404).send({ message: "Application not found" });
 
-    // ✅ Old audit value without adminGroups (function handles if undefined)
     const oldCleanValue = await buildAuditAppObject(app, undefined, undefined, undefined);
 
-    // ✅ Destructure adminGroups as well
-    const { roles, groups, adminGroups, ...data } = req.body;
+    // ✅ Destructure non-model fields
+    const { roles, groups, adminGroups, instrumentIds, computerIds, ...data } = req.body;
+
     if (data.facilityId !== undefined) {
       const facility = await Facility.findByPk(data.facilityId);
       if (!facility || facility.type !== "FACTORY") {
         return res.status(400).send({ message: "Facility must be a FACTORY" });
+      }
+    }
+
+    // ✅ Validate instruments if provided
+    if (instrumentIds !== undefined && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
+      const alreadyAssigned = await Instrument.findAll({
+        where: {
+          id: { [Op.in]: instrumentIds },
+          applicationId: { [Op.ne]: null },
+          [Op.and]: [{ applicationId: { [Op.ne]: app.id } }],
+        },
+        attributes: ["id", "instrumentId"],
+      });
+      if (alreadyAssigned.length > 0) {
+        return res.status(400).send({
+          message: `Following instruments already assigned to another application: ${alreadyAssigned.map(i => i.instrumentId).join(", ")}`,
+        });
       }
     }
 
@@ -191,8 +248,52 @@ exports.update = async (req, res) => {
       oemContact: data.oemContact,
       status: data.status,
       facilityId: data.facilityId !== undefined ? data.facilityId : app.facilityId,
+      departmentId: data.departmentId !== undefined ? data.departmentId : app.departmentId,
+      applicationOwner: data.applicationOwner !== undefined ? data.applicationOwner : app.applicationOwner,
+      gampCategory: data.gampCategory !== undefined ? data.gampCategory : app.gampCategory,
+      validated: data.validated !== undefined ? data.validated : app.validated,
+      eresApplicable: data.eresApplicable !== undefined ? data.eresApplicable : app.eresApplicable,
+      lastPeriodicReviewDate: data.lastPeriodicReviewDate !== undefined ? data.lastPeriodicReviewDate : app.lastPeriodicReviewDate,
+      databaseType: data.databaseType !== undefined ? data.databaseType : app.databaseType,
+      auditTrailEnabled: data.auditTrailEnabled !== undefined ? data.auditTrailEnabled : app.auditTrailEnabled,
+      applicationCriticality: data.applicationCriticality !== undefined ? data.applicationCriticality : app.applicationCriticality,
       updatedBy: req.userId,
     });
+
+    // ✅ CASCADE ON RETIRED
+    if (data.status === "RETIRED" && app.status !== "RETIRED") {
+      await Instrument.update(
+        { status: "RETIRED" },
+        { where: { applicationId: app.id } }
+      );
+
+      const linkedComputers = await db.Computer.findAll({
+        include: [{ model: Application, as: "applications", where: { id: app.id } }],
+      });
+      for (const comp of linkedComputers) {
+        if (comp.status !== "INACTIVE") {
+          await comp.update({ status: "INACTIVE" });
+        }
+      }
+
+      const activeUsers = await db.ActiveUserList.findAll({
+        where: { applicationId: app.id, status: "Active" },
+      });
+      for (const au of activeUsers) {
+        await au.update({ status: "Inactive" });
+      }
+
+      await auditHelper(
+        "APPLICATION",
+        app.id,
+        "RETIRED",
+        { Status: "ACTIVE" },
+        { Status: "RETIRED", DeactivatedUsers: activeUsers.length },
+        req.userId,
+        req.ip,
+        "Application retired – linked assets and users updated"
+      );
+    }
 
     if (roles !== undefined) {
       await ApplicationRole.destroy({ where: { applicationId: app.id } });
@@ -209,23 +310,41 @@ exports.update = async (req, res) => {
       }
     }
 
-    // ✅ Update admin groups
     if (adminGroups !== undefined) {
       const groupRecords = await Group.findAll({ where: { id: adminGroups } });
       await app.setAdminGroups(groupRecords);
     }
 
-    // ✅ Reload with all associations for audit
+    // ✅ Handle instrument linking
+    if (instrumentIds !== undefined) {
+      // Unlink instruments not in new list
+      await Instrument.update(
+        { applicationId: null },
+        { where: { applicationId: app.id, id: { [Op.notIn]: instrumentIds } } }
+      );
+      if (instrumentIds.length > 0) {
+        await Instrument.update(
+          { applicationId: app.id },
+          { where: { id: { [Op.in]: instrumentIds } } }
+        );
+      }
+    }
+
+    // ✅ Handle computer linking
+    if (computerIds !== undefined) {
+      const computers = await Computer.findAll({ where: { id: { [Op.in]: computerIds } } });
+      await app.setComputers(computers);
+    }
+
     await app.reload({
       include: [
         { model: ApplicationRole, as: "applicationRoles" },
         { model: ApplicationGroup, as: "applicationGroups" },
-        { model: Group, as: "adminGroups" }
-      ]
+        { model: Group, as: "adminGroups" },
+      ],
     });
     const newCleanValue = await buildAuditAppObject(app, roles, groups);
 
-    // --- diff only changed fields ---
     const changedOld = {};
     const changedNew = {};
     for (const key of Object.keys(oldCleanValue)) {
@@ -244,7 +363,7 @@ exports.update = async (req, res) => {
                       req.userId, req.ip, "Application updated");
     res.send(app);
   } catch (error) {
-    console.error('Application update error:', error);
+    console.error("Application update error:", error);
     res.status(500).send({ message: error.message });
   }
 };
@@ -255,9 +374,8 @@ exports.delete = async (req, res) => {
       include: [
         { model: Facility, as: "facility" },
         { model: ApplicationRole, as: "applicationRoles" },
-        { model: ApplicationGroup, as: "applicationGroups" }
-        // adminGroups not needed for delete
-      ]
+        { model: ApplicationGroup, as: "applicationGroups" },
+      ],
     });
     if (!app) return res.status(404).send({ message: "Application not found" });
     const oldCleanValue = await buildAuditAppObject(app, undefined, undefined, undefined);
@@ -286,13 +404,13 @@ exports.listForRequest = async (req, res) => {
     const apps = await Application.findAll({
       attributes: ["id", "name"],
       include: [
-        { model: ApplicationRole, as: "applicationRoles", attributes: ["roleName"] }
-      ]
+        { model: ApplicationRole, as: "applicationRoles", attributes: ["roleName"] },
+      ],
     });
     const result = apps.map(app => ({
       id: app.id,
       name: app.name,
-      roles: app.applicationRoles.map(r => r.roleName)
+      roles: app.applicationRoles.map(r => r.roleName),
     }));
     res.send(result);
   } catch (error) {

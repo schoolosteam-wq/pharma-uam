@@ -8,7 +8,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   UploadOutlined,
-  DownloadOutlined,   // ✅ Added
+  DownloadOutlined,
 } from '@ant-design/icons';
 import computerService from '../../services/computerService';
 import instrumentService from '../../services/instrumentService';
@@ -32,6 +32,9 @@ const ComputerList = () => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const [appMode, setAppMode] = useState('Single');
+
+  // ✅ New state for filtered instruments
+  const [availableInstruments, setAvailableInstruments] = useState([]);
 
   // Permission hooks
   const { canCreate, canEdit, canDelete } = usePermission();
@@ -91,7 +94,7 @@ const ComputerList = () => {
       title: `${item.code} - ${item.name}`,
     }));
 
-  // ---------- Sample CSV download handler (NEW) ----------
+  // ---------- Sample CSV download handler ----------
   const handleDownloadSample = async () => {
     try {
       const res = await computerService.downloadSampleCsv();
@@ -112,6 +115,10 @@ const ComputerList = () => {
     setEditing(null);
     form.resetFields();
     setAppMode('Single');
+    // ✅ Filter instruments not linked to any computer
+    setAvailableInstruments(
+      instruments.filter((i) => !i.computers || i.computers.length === 0)
+    );
     setModalVisible(true);
   };
 
@@ -136,6 +143,15 @@ const ComputerList = () => {
       departmentId: record.department?.id || undefined,
     });
     setAppMode(record.applications?.length > 1 ? 'Multi' : 'Single');
+    // ✅ Filter instruments not linked to any computer OR only linked to this computer
+    setAvailableInstruments(
+      instruments.filter(
+        (i) =>
+          !i.computers ||
+          i.computers.length === 0 ||
+          i.computers.every((c) => c.id === record.id)
+      )
+    );
     setModalVisible(true);
   };
 
@@ -425,9 +441,10 @@ const ComputerList = () => {
             </Form.Item>
           )}
 
+          {/* ✅ Connected Instruments - using availableInstruments */}
           <Form.Item name="instrumentIds" label="Connected Instruments">
             <Select mode="multiple" placeholder="Select instruments" allowClear>
-              {instruments.map((i) => (
+              {availableInstruments.map((i) => (
                 <Option key={i.id} value={i.id}>
                   {i.instrumentId} - {i.make} {i.model}
                 </Option>
