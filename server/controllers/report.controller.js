@@ -187,11 +187,11 @@ function buildReportHTML({
       approvedByLabel: template.approvedByLabel || "Approved By",
     };
     footerHtml = replacePlaceholders(template.footerTemplateHtml, placeholders);
-    } else {
+  } else {
     // Simplified fallback footer with optional approval table
     const footerSopText = template.footerText || "";
-    const printedBy = currentUser?.fullName || currentUser?.username || "System";
-    const printedDateTime = new Date().toLocaleString();
+    const printedByLocal = currentUser?.fullName || currentUser?.username || "System";
+    const printedDateTimeLocal = new Date().toLocaleString();
     const pageNumberText = template.showPageNumber !== false ? "Page 1 of 1" : "";
 
     // Approval table (Prepared By, Reviewed By, Approved By) – shown if any enabled
@@ -217,7 +217,7 @@ function buildReportHTML({
         ${approvalTableHtml}
         ${footerSopText ? `<div style="text-align:left; margin-bottom:5px;">${footerSopText}</div>` : ""}
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span>Printed By: ${printedBy} | ${printedDateTime}</span>
+          <span>Printed By: ${printedByLocal} | ${printedDateTimeLocal}</span>
           ${pageNumberText ? `<span>${pageNumberText}</span>` : ""}
         </div>
         <div style="text-align:center; margin-top:5px;">This report is system generated and does not require signature.</div>
@@ -276,7 +276,7 @@ function buildReportHTML({
   return html;
 }
 
-// Column definitions per report type
+// ================== 🆕 UPDATED COLUMN DEFINITIONS (from attached file) ==================
 const columnDefinitions = {
   activeUsers: {
     srNo: { label: "Sr. No." },
@@ -293,11 +293,23 @@ const columnDefinitions = {
     oemContact: { label: "OEM Contact" },
     status: { label: "Status" },
     facilityName: { label: "Facility" },
+    departmentName: { label: "Department" },
+    applicationOwner: { label: "Application Owner" },
+    gampCategory: { label: "GAMP Category" },
+    validated: { label: "Validated" },
+    eresApplicable: { label: "ERES Applicable" },
+    lastPeriodicReviewDate: { label: "Last Periodic Review Date" },
+    databaseType: { label: "Database Type" },
+    auditTrailEnabled: { label: "Audit Trail Enabled" },
+    applicationCriticality: { label: "Application Criticality" },
     roles: { label: "Roles" },
     groups: { label: "Groups" },
     adminGroups: { label: "Admin Groups" },
   },
   instrument: {
+    instrumentId: { label: "Instrument ID" },
+    assetCode: { label: "Asset Code" },
+    instrumentType: { label: "Instrument Type" },
     make: { label: "Make" },
     model: { label: "Model" },
     serialNumber: { label: "Serial Number" },
@@ -305,15 +317,26 @@ const columnDefinitions = {
     status: { label: "Status" },
     applicationName: { label: "Application" },
     facilityName: { label: "Facility" },
+    departmentName: { label: "Department" },
     currentLocation: { label: "Current Location" },
+    connectionStatus: { label: "Connection Status" },
     connectedComputers: { label: "Connected Computers" },
   },
   computer: {
+    hostname: { label: "Hostname" },
     computerMakeModel: { label: "Make & Model" },
     serialNumber: { label: "Serial Number" },
+    assetCode: { label: "Asset Code" },
+    osVersion: { label: "OS Version" },
+    antivirusStatus: { label: "Antivirus Status" },
+    domainStatus: { label: "Domain Status" },
+    systemOwner: { label: "System Owner" },
+    csvDone: { label: "CSV Done" },
+    location: { label: "Location" },
     ipAddress: { label: "IP Address" },
     status: { label: "Status" },
     facilityName: { label: "Facility" },
+    departmentName: { label: "Department" },
     connectedApplications: { label: "Connected Applications" },
     connectedInstruments: { label: "Connected Instruments" },
   },
@@ -404,7 +427,7 @@ exports.activeUserListPDF = async (req, res) => {
   }
 };
 
-// ================== Application PDF ==================
+// ================== 🆕 UPDATED Application PDF ==================
 exports.applicationListPDF = async (req, res) => {
   try {
     const { status, facilityId } = req.query;
@@ -425,6 +448,7 @@ exports.applicationListPDF = async (req, res) => {
         { model: db.ApplicationRole, as: "applicationRoles", attributes: ["roleName"] },
         { model: db.ApplicationGroup, as: "applicationGroups", attributes: ["groupName"] },
         { model: db.Facility, as: "facility", attributes: ["name"] },
+        { model: db.Facility, as: "department", attributes: ["name"] },
         { model: db.Group, as: "adminGroups", attributes: ["groupName"] },
       ],
       order: [["name", "ASC"]],
@@ -437,12 +461,20 @@ exports.applicationListPDF = async (req, res) => {
       oemContact: app.oemContact,
       status: app.status,
       facilityName: app.facility?.name || "",
+      departmentName: app.department?.name || "",
+      applicationOwner: app.applicationOwner || "",
+      gampCategory: app.gampCategory || "",
+      validated: app.validated ? "Yes" : "No",
+      eresApplicable: app.eresApplicable ? "Yes" : "No",
+      lastPeriodicReviewDate: app.lastPeriodicReviewDate || "",
+      databaseType: app.databaseType || "",
+      auditTrailEnabled: app.auditTrailEnabled ? "Yes" : "No",
+      applicationCriticality: app.applicationCriticality || "",
       roles: app.applicationRoles?.map(r => r.roleName).join(", ") || "",
       groups: app.applicationGroups?.map(g => g.groupName).join(", ") || "",
       adminGroups: app.adminGroups?.map(g => g.groupName).join(", ") || "",
     }));
 
-    // Determine facilityId for template: if facilityId param given use that, else global fallback works via application's facility? We'll use first application's facility or null.
     const effectiveFacilityId = applications.length > 0 ? applications[0].facilityId : null;
     const template = await getEffectiveTemplate(effectiveFacilityId, "application");
     const currentUser = await db.User.findByPk(req.userId, { attributes: ["id", "fullName", "username"] });
@@ -467,7 +499,7 @@ exports.applicationListPDF = async (req, res) => {
   }
 };
 
-// ================== Instrument PDF ==================
+// ================== 🆕 UPDATED Instrument PDF ==================
 exports.instrumentListPDF = async (req, res) => {
   try {
     const { status, applicationId, facilityId } = req.query;
@@ -488,12 +520,16 @@ exports.instrumentListPDF = async (req, res) => {
       include: [
         { model: db.Application, as: "application", attributes: ["name"] },
         { model: db.Facility, as: "facility", attributes: ["name"] },
+        { model: db.Facility, as: "department", attributes: ["name"] },
         { model: db.Computer, as: "computers", through: { attributes: [] }, attributes: ["computerMakeModel"] },
       ],
-      order: [["make", "ASC"]],
+      order: [["instrumentId", "ASC"]],
     });
 
     const rows = instruments.map(inst => ({
+      instrumentId: inst.instrumentId,
+      assetCode: inst.assetCode || "",
+      instrumentType: inst.instrumentType || "",
       make: inst.make,
       model: inst.model,
       serialNumber: inst.serialNumber,
@@ -501,7 +537,9 @@ exports.instrumentListPDF = async (req, res) => {
       status: inst.status,
       applicationName: inst.application?.name || "",
       facilityName: inst.facility?.name || "",
-      currentLocation: inst.currentLocation,
+      departmentName: inst.department?.name || "",
+      currentLocation: inst.currentLocation || "",
+      connectionStatus: inst.connectionStatus || "",
       connectedComputers: inst.computers?.map(c => c.computerMakeModel).join(", ") || "",
     }));
 
@@ -529,7 +567,7 @@ exports.instrumentListPDF = async (req, res) => {
   }
 };
 
-// ================== Computer PDF ==================
+// ================== 🆕 UPDATED Computer PDF ==================
 exports.computerListPDF = async (req, res) => {
   try {
     const { status, facilityId } = req.query;
@@ -548,18 +586,28 @@ exports.computerListPDF = async (req, res) => {
       where,
       include: [
         { model: db.Facility, as: "facility", attributes: ["name"] },
+        { model: db.Facility, as: "department", attributes: ["name"] },
         { model: db.Application, as: "applications", through: { attributes: [] }, attributes: ["name"] },
         { model: db.Instrument, as: "instruments", through: { attributes: [] }, attributes: ["make", "model"] },
       ],
-      order: [["computerMakeModel", "ASC"]],
+      order: [["hostname", "ASC"]],
     });
 
     const rows = computers.map(comp => ({
+      hostname: comp.hostname,
       computerMakeModel: comp.computerMakeModel,
       serialNumber: comp.serialNumber,
+      assetCode: comp.assetCode || "",
+      osVersion: comp.osVersion || "",
+      antivirusStatus: comp.antivirusStatus || "",
+      domainStatus: comp.domainStatus || "",
+      systemOwner: comp.systemOwner || "",
+      csvDone: comp.csvDone ? "Yes" : "No",
+      location: comp.location || "",
       ipAddress: comp.ipAddress,
       status: comp.status,
       facilityName: comp.facility?.name || "",
+      departmentName: comp.department?.name || "",
       connectedApplications: comp.applications?.map(a => a.name).join(", ") || "",
       connectedInstruments: comp.instruments?.map(i => `${i.make} ${i.model}`).join(", ") || "",
     }));
@@ -617,7 +665,7 @@ exports.auditTrailPDF = async (req, res) => {
       comments: log.comments || "",
     }));
 
-    const template = await getEffectiveTemplate(null, "audit"); // audit global only for now
+    const template = await getEffectiveTemplate(null, "audit");
     const currentUser = await db.User.findByPk(req.userId, { attributes: ["id", "fullName", "username"] });
 
     const columnsMap = columnDefinitions.audit;

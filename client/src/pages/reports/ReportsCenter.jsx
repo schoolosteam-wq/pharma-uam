@@ -132,24 +132,35 @@ const ReportsCenter = () => {
         { title: 'Manufacturer', dataIndex: 'manufacturer', key: 'manufacturer' },
         { title: 'Version', dataIndex: 'versionNo', key: 'versionNo' },
         { title: 'Status', dataIndex: 'status', key: 'status', render: (text) => <Tag>{text}</Tag> },
+        { title: 'Department', key: 'department', render: (_, record) => record.department?.name || '-' },
         { title: 'Facility', key: 'facility', render: (_, record) => record.facility?.name || '-' },
+        { title: 'Owner', dataIndex: 'applicationOwner', key: 'applicationOwner' },
+        { title: 'GAMP', dataIndex: 'gampCategory', key: 'gampCategory' },
+        { title: 'Criticality', dataIndex: 'applicationCriticality', key: 'applicationCriticality' },
       ];
     } else if (reportType === 'instrument') {
       return [
+        { title: 'Instrument ID', dataIndex: 'instrumentId', key: 'instrumentId' },
+        { title: 'Type', dataIndex: 'instrumentType', key: 'instrumentType' },
         { title: 'Make', dataIndex: 'make', key: 'make' },
         { title: 'Model', dataIndex: 'model', key: 'model' },
         { title: 'Serial Number', dataIndex: 'serialNumber', key: 'serialNumber' },
         { title: 'Status', dataIndex: 'status', key: 'status', render: (text) => <Tag>{text}</Tag> },
         { title: 'Application', key: 'application', render: (_, record) => record.application?.name || '-' },
+        { title: 'Department', key: 'department', render: (_, record) => record.department?.name || '-' },
         { title: 'Facility', key: 'facility', render: (_, record) => record.facility?.name || '-' },
       ];
     } else if (reportType === 'computer') {
       return [
+        { title: 'Hostname', dataIndex: 'hostname', key: 'hostname' },
         { title: 'Make & Model', dataIndex: 'computerMakeModel', key: 'computerMakeModel' },
         { title: 'Serial Number', dataIndex: 'serialNumber', key: 'serialNumber' },
         { title: 'IP Address', dataIndex: 'ipAddress', key: 'ipAddress' },
         { title: 'Status', dataIndex: 'status', key: 'status', render: (text) => <Tag>{text}</Tag> },
+        { title: 'Department', key: 'department', render: (_, record) => record.department?.name || '-' },
         { title: 'Facility', key: 'facility', render: (_, record) => record.facility?.name || '-' },
+        { title: 'OS Version', dataIndex: 'osVersion', key: 'osVersion' },
+        { title: 'Antivirus', dataIndex: 'antivirusStatus', key: 'antivirusStatus' },
       ];
     }
     return [];
