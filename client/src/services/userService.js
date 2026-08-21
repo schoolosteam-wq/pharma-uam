@@ -14,6 +14,12 @@ const bulkUpload = (formData) => API.post('/users/bulk-upload', formData, {
 });
 const downloadSampleCsv = () => API.get('/users/sample-csv', { responseType: 'blob' });
 
+const searchUsers = (search, limit = 50) => {
+  const params = { search };
+  if (limit) params.limit = limit;
+  return API.get('/users', { params });
+};
+
 const userService = {
   getAll,
   getOne,
@@ -22,7 +28,8 @@ const userService = {
   remove,
   getProfile,
   bulkUpload,
-  downloadSampleCsv
+  downloadSampleCsv,
+  searchUsers
 };
 
 export default userService;

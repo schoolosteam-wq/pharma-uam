@@ -1,5 +1,5 @@
 const db = require("../models");
-const { Op } = require("sequelize");   // ✅ Added
+const { Op } = require("sequelize");
 const Computer = db.Computer;
 const Instrument = db.Instrument;
 const Application = db.Application;
@@ -9,14 +9,17 @@ const { getUserFacilities, applyFacilityFilter } = require("../utils/facilityFil
 
 async function buildAuditComputerObject(computer) {
   const facility = computer.facilityId ? await Facility.findByPk(computer.facilityId) : null;
+  const department = computer.departmentId ? await Facility.findByPk(computer.departmentId) : null;
   const connectedInstruments = computer.instruments ? computer.instruments.map(i => `${i.make} ${i.model}`) : [];
   const connectedApplications = computer.applications ? computer.applications.map(a => a.name) : [];
   return {
+    "Hostname": computer.hostname,
     "Make & Model": computer.computerMakeModel,
     "Serial Number": computer.serialNumber,
     "IP Address": computer.ipAddress,
     Status: computer.status,
     Facility: facility ? facility.name : null,
+    Department: department ? department.name : null,
     "Connected Instruments": connectedInstruments,
     "Connected Applications": connectedApplications,
   };
@@ -32,7 +35,6 @@ exports.create = async (req, res) => {
       }
     }
 
-    // ✅ फैक्ट्री वैलिडेशन (यदि facilityId मौजूद है)
     if (facilityId) {
       const facility = await Facility.findByPk(facilityId);
       if (!facility || facility.type !== "FACTORY") {
@@ -40,9 +42,16 @@ exports.create = async (req, res) => {
       }
     }
 
-    const { computerMakeModel, serialNumber, ipAddress, status, instrumentIds, applicationIds } = req.body;
+    const {
+      hostname, computerMakeModel, serialNumber, assetCode, osVersion,
+      antivirusStatus, domainStatus, systemOwner, csvDone, location,
+      ipAddress, status, instrumentIds, applicationIds, departmentId
+    } = req.body;
 
-    // ========== 🆕 VALIDATION: Check if instruments already linked to another computer ==========
+    if (!hostname) {
+      return res.status(400).send({ message: "Hostname is required" });
+    }
+
     if (instrumentIds && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
       const alreadyLinked = await db.ComputerInstrument.findAll({
         where: { instrumentId: { [Op.in]: instrumentIds } },
@@ -56,16 +65,32 @@ exports.create = async (req, res) => {
     }
 
     const computer = await Computer.create({
-      computerMakeModel, serialNumber, ipAddress, status, facilityId,
+      hostname,
+      computerMakeModel,
+      serialNumber,
+      assetCode: assetCode || null,
+      osVersion: osVersion || null,
+      antivirusStatus: antivirusStatus || "Not Installed",
+      domainStatus: domainStatus || "Workgroup",
+      systemOwner: systemOwner || null,
+      csvDone: csvDone ?? false,
+      location: location || null,
+      ipAddress: ipAddress || null,
+      status: status || "ACTIVE",
+      departmentId: departmentId || null,
+      facilityId: facilityId || null,
       createdBy: req.userId,
     });
+
     if (instrumentIds) await computer.setInstruments(instrumentIds);
     if (applicationIds) await computer.setApplications(applicationIds);
+
     const cleanNewValue = await buildAuditComputerObject(computer);
     await auditHelper("COMPUTER", computer.id, "CREATED", null, cleanNewValue,
                       req.userId, req.ip, "Computer created");
     res.status(201).send(computer);
   } catch (error) {
+    console.error("Computer create error:", error);
     res.status(500).send({ message: error.message });
   }
 };
@@ -76,7 +101,8 @@ exports.findAll = async (req, res) => {
       include: [
         { model: Instrument, as: "instruments", attributes: ["id", "make", "model"] },
         { model: Application, as: "applications", attributes: ["id", "name"] },
-        { model: Facility, as: "facility", attributes: ["id", "name"] }
+        { model: Facility, as: "facility", attributes: ["id", "name"] },
+        { model: Facility, as: "department", attributes: ["id", "name"] },
       ]
     };
 
@@ -101,7 +127,8 @@ exports.findOne = async (req, res) => {
       include: [
         { model: Instrument, as: "instruments" },
         { model: Application, as: "applications" },
-        { model: Facility, as: "facility" }
+        { model: Facility, as: "facility", attributes: ["id", "name"] },
+        { model: Facility, as: "department", attributes: ["id", "name"] },
       ]
     });
     if (!computer) return res.status(404).send({ message: "Not found" });
@@ -121,15 +148,19 @@ exports.update = async (req, res) => {
       include: [
         { model: Instrument, as: "instruments" },
         { model: Application, as: "applications" },
-        { model: Facility, as: "facility" }
+        { model: Facility, as: "facility" },
+        { model: Facility, as: "department" },
       ]
     });
     if (!computer) return res.status(404).send({ message: "Not found" });
 
     const oldCleanValue = await buildAuditComputerObject(computer);
-    const { computerMakeModel, serialNumber, ipAddress, status, instrumentIds, applicationIds, facilityId } = req.body;
+    const {
+      hostname, computerMakeModel, serialNumber, assetCode, osVersion,
+      antivirusStatus, domainStatus, systemOwner, csvDone, location,
+      ipAddress, status, instrumentIds, applicationIds, facilityId, departmentId
+    } = req.body;
 
-    // ✅ फैक्ट्री वैलिडेशन (यदि facilityId भेजा गया है)
     if (facilityId !== undefined) {
       const facility = await Facility.findByPk(facilityId);
       if (!facility || facility.type !== "FACTORY") {
@@ -137,23 +168,77 @@ exports.update = async (req, res) => {
       }
     }
 
+    const oldStatus = computer.status;
+
     await computer.update({
-      computerMakeModel, serialNumber, ipAddress, status, facilityId,
+      hostname: hostname !== undefined ? hostname : computer.hostname,
+      computerMakeModel: computerMakeModel !== undefined ? computerMakeModel : computer.computerMakeModel,
+      serialNumber: serialNumber !== undefined ? serialNumber : computer.serialNumber,
+      assetCode: assetCode !== undefined ? assetCode : computer.assetCode,
+      osVersion: osVersion !== undefined ? osVersion : computer.osVersion,
+      antivirusStatus: antivirusStatus !== undefined ? antivirusStatus : computer.antivirusStatus,
+      domainStatus: domainStatus !== undefined ? domainStatus : computer.domainStatus,
+      systemOwner: systemOwner !== undefined ? systemOwner : computer.systemOwner,
+      csvDone: csvDone !== undefined ? csvDone : computer.csvDone,
+      location: location !== undefined ? location : computer.location,
+      ipAddress: ipAddress !== undefined ? ipAddress : computer.ipAddress,
+      status: status !== undefined ? status : computer.status,
+      departmentId: departmentId !== undefined ? departmentId : computer.departmentId,
+      facilityId: facilityId !== undefined ? facilityId : computer.facilityId,
       updatedBy: req.userId,
     });
 
-    // ========== 🆕 CASCADE ON INACTIVE (ADDED) ==========
-    if (status === "INACTIVE" && computer.status !== "INACTIVE") {
-      // Unlink from applications
+    // ===== GRANULAR CASCADE ON INACTIVE =====
+    if (status === "INACTIVE" && oldStatus !== "INACTIVE") {
+      // Unlink applications with audit
+      const linkedAppIds = await db.ComputerApplication.findAll({
+        where: { computerId: computer.id },
+        attributes: ["applicationId"],
+      });
+      for (const link of linkedAppIds) {
+        const app = await Application.findByPk(link.applicationId, { attributes: ["id", "name"] });
+        if (app) {
+          await auditHelper(
+            "APPLICATION",
+            app.id,
+            "UNLINKED_BY_COMPUTER_INACTIVE",
+            { ComputerId: computer.id },
+            { ComputerId: null },
+            req.userId,
+            req.ip,
+            `Application ${app.name} unlinked due to computer ${computer.hostname} inactivation`
+          );
+        }
+      }
       await db.ComputerApplication.destroy({ where: { computerId: computer.id } });
-      // Unlink from instruments
+
+      // Unlink instruments with audit
+      const linkedInstIds = await db.ComputerInstrument.findAll({
+        where: { computerId: computer.id },
+        attributes: ["instrumentId"],
+      });
+      for (const link of linkedInstIds) {
+        const inst = await Instrument.findByPk(link.instrumentId, { attributes: ["id", "instrumentId"] });
+        if (inst) {
+          await auditHelper(
+            "INSTRUMENT",
+            inst.id,
+            "UNLINKED_BY_COMPUTER_INACTIVE",
+            { ComputerId: computer.id },
+            { ComputerId: null },
+            req.userId,
+            req.ip,
+            `Instrument ${inst.instrumentId} unlinked due to computer ${computer.hostname} inactivation`
+          );
+        }
+      }
       await db.ComputerInstrument.destroy({ where: { computerId: computer.id } });
-      // Audit
+
       await auditHelper(
         "COMPUTER",
         computer.id,
         "INACTIVE",
-        { Status: "ACTIVE" },
+        { Status: oldStatus },
         { Status: "INACTIVE", Unlinked: true },
         req.userId,
         req.ip,
@@ -161,7 +246,6 @@ exports.update = async (req, res) => {
       );
     }
 
-    // ========== 🆕 VALIDATION: Check instruments in update ==========
     if (instrumentIds !== undefined) {
       const alreadyLinked = await db.ComputerInstrument.findAll({
         where: {
@@ -178,11 +262,20 @@ exports.update = async (req, res) => {
       await computer.setInstruments(instrumentIds);
     }
 
-    if (applicationIds !== undefined) await computer.setApplications(applicationIds);
-    await computer.reload({ include: [{ model: Instrument, as: "instruments" }, { model: Application, as: "applications" }] });
+    if (applicationIds !== undefined) {
+      await computer.setApplications(applicationIds);
+    }
+
+    await computer.reload({
+      include: [
+        { model: Instrument, as: "instruments" },
+        { model: Application, as: "applications" },
+        { model: Facility, as: "facility" },
+        { model: Facility, as: "department" },
+      ],
+    });
     const newCleanValue = await buildAuditComputerObject(computer);
 
-    // --- diff only changed fields ---
     const changedOld = {};
     const changedNew = {};
     for (const key of Object.keys(oldCleanValue)) {
@@ -193,16 +286,15 @@ exports.update = async (req, res) => {
     }
 
     if (Object.keys(changedOld).length > 0) {
-      changedOld["Make & Model"] = computer.computerMakeModel;
-      changedNew["Make & Model"] = computer.computerMakeModel;
-      changedOld["Serial Number"] = computer.serialNumber;
-      changedNew["Serial Number"] = computer.serialNumber;
+      changedOld["Hostname"] = computer.hostname;
+      changedNew["Hostname"] = computer.hostname;
     }
 
     await auditHelper("COMPUTER", computer.id, "UPDATED", changedOld, changedNew,
                       req.userId, req.ip, "Computer updated");
     res.send(computer);
   } catch (error) {
+    console.error("Computer update error:", error);
     res.status(500).send({ message: error.message });
   }
 };
@@ -210,8 +302,12 @@ exports.update = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     const computer = await Computer.findByPk(req.params.id, {
-      include: [{ model: Facility, as: "facility" }, { model: Instrument, as: "instruments" },
-                { model: Application, as: "applications" }]
+      include: [
+        { model: Facility, as: "facility" },
+        { model: Facility, as: "department" },
+        { model: Instrument, as: "instruments" },
+        { model: Application, as: "applications" },
+      ]
     });
     if (!computer) return res.status(404).send({ message: "Not found" });
     const oldCleanValue = await buildAuditComputerObject(computer);

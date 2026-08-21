@@ -13,6 +13,7 @@ const sendTestEmail = (email) => API.post('/settings/send-test-email', { test_em
 const uploadLogo = (formData) => API.post('/settings/upload-logo', formData, {
   headers: { 'Content-Type': 'multipart/form-data' }
 });
+const getLogo = () => API.get('/settings/logo');
 
-const settingsService = { getADConfig, saveADConfig, getOUMapping, saveOUMapping, syncADUsers, testADConnection, getEmailConfig, saveEmailConfig, testEmailConnection, sendTestEmail, uploadLogo };
+const settingsService = { getADConfig, saveADConfig, getOUMapping, saveOUMapping, syncADUsers, testADConnection, getEmailConfig, saveEmailConfig, testEmailConnection, sendTestEmail, uploadLogo, getLogo };
 export default settingsService;

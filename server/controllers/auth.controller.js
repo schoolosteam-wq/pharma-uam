@@ -13,6 +13,118 @@ const { Op } = require("sequelize");
 
 const { generateRequestNo } = require("./request.controller");
 
+// ---------- LDAP Authentication Helper (Safe & Robust) ----------
+async function authenticateAD(user, password, adConfig) {
+  if (!adConfig.ad_enabled || adConfig.ad_enabled !== "true") {
+    throw new Error("AD authentication not enabled");
+  }
+
+  const domain = adConfig.ad_domain || "company.com";
+  const netbiosCandidates = ["BVLDOMAIN", "BVL", domain.toUpperCase().split('.')[0]];
+
+  const possibleUpns = new Set();
+
+  if (user.domainUserId) {
+    if (user.domainUserId.includes("@")) possibleUpns.add(user.domainUserId);
+    else possibleUpns.add(`${user.domainUserId}@${domain}`);
+  }
+  if (user.username) {
+    possibleUpns.add(`${user.username}@${domain}`);
+    possibleUpns.add(user.username);
+  }
+  possibleUpns.add(`${domain}\\${user.domainUserId || user.username}`);
+  for (const nb of netbiosCandidates) {
+    possibleUpns.add(`${nb}\\${user.domainUserId || user.username}`);
+  }
+
+  // Search user details via admin bind
+  try {
+    const adminClient = ldap.createClient({ url: adConfig.ad_url });
+    await new Promise((resolve, reject) => {
+      adminClient.on("error", reject);
+      adminClient.bind(adConfig.ad_username, adConfig.ad_password, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    const searchOpts = {
+      filter: `(sAMAccountName=${user.domainUserId || user.username})`,
+      scope: "sub",
+      attributes: ["userPrincipalName", "distinguishedName", "sAMAccountName", "userAccountControl", "lockoutTime"],
+    };
+    const searchResult = await new Promise((resolve, reject) => {
+      const entries = [];
+      adminClient.search(adConfig.ad_baseDN, searchOpts, (err, res) => {
+        if (err) reject(err);
+        res.on("searchEntry", (entry) => {
+          const attrs = {};
+          entry.attributes.forEach((attr) => {
+            attrs[attr.type] = attr.values[0];
+          });
+          entries.push(attrs);
+        });
+        res.on("end", () => resolve(entries));
+        res.on("error", reject);
+      });
+    });
+    adminClient.destroy();
+
+    if (searchResult.length > 0) {
+      const attrs = searchResult[0];
+      console.log(`[AD SEARCH] User ${user.username}:`, JSON.stringify(attrs, null, 2));
+      if (attrs.userPrincipalName && attrs.userPrincipalName !== "") {
+        possibleUpns.add(attrs.userPrincipalName);
+      }
+      if (attrs.distinguishedName && attrs.distinguishedName !== "") {
+        possibleUpns.add(attrs.distinguishedName);
+      }
+    } else {
+      console.error(`[AD SEARCH] No user found for ${user.username}`);
+    }
+  } catch (searchErr) {
+    console.error(`[AD SEARCH] Failed for ${user.username}:`, searchErr.message);
+  }
+
+  let lastError = null;
+  for (const upn of possibleUpns) {
+    console.log(`[LDAP DEBUG] Trying bind for ${user.username}: ${upn}`);
+    try {
+      const client = ldap.createClient({ url: adConfig.ad_url });
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const handleError = (err) => {
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+          client.destroy();
+        };
+        client.on("error", handleError);
+        client.on("connectTimeout", () => handleError(new Error("LDAP connection timeout")));
+        client.bind(upn, password, (err) => {
+          if (err) {
+            handleError(err);
+          } else {
+            settled = true;
+            client.destroy();
+            resolve();
+          }
+        });
+      });
+      return true;
+    } catch (err) {
+      lastError = err;
+      console.error(`[LDAP DEBUG] Bind failed for ${upn}:`, err.message);
+      // Log full error properties if available
+      if (err.code) console.error(`[LDAP DEBUG] Error code: ${err.code}`);
+      if (err.dn) console.error(`[LDAP DEBUG] Error DN: ${err.dn}`);
+    }
+  }
+
+  throw lastError || new Error("LDAP authentication failed");
+}
+
 // ---------- Precheck: बिना token/audit के credentials वेरिफाई करके facilities लौटाए ----------
 exports.precheck = async (req, res) => {
   try {
@@ -23,12 +135,10 @@ exports.precheck = async (req, res) => {
       include: [{ model: db.Role, as: "roles" }]
     });
 
-    // ✅ FIX: पहले user का null check करें
     if (!user) {
       return res.status(401).send({ message: "Invalid credentials" });
     }
 
-    // ✅ अब isActive check करें (अगर false हो तो block करें)
     if (user.isActive === false) {
       return res.status(401).send({ message: "Account is inactive. Contact administrator." });
     }
@@ -37,15 +147,16 @@ exports.precheck = async (req, res) => {
     if (!user.passwordHash) {
       try {
         const adConfig = await getADConfig();
-        if (adConfig.ad_enabled !== "true") return res.status(401).send({ message: "AD not enabled" });
-        const client = ldap.createClient({ url: adConfig.ad_url });
-        const upn = `${user.domainUserId || user.username}@${adConfig.ad_domain || 'company.com'}`;
-        await new Promise((resolve, reject) => {
-          client.bind(upn, password, (err) => err ? reject(err) : resolve());
-        });
-        client.destroy();
+        if (adConfig.ad_enabled !== "true") {
+          return res.status(401).send({ message: "AD not enabled" });
+        }
+        const upn = `${user.domainUserId || user.username}@${adConfig.ad_domain || "company.com"}`;
+        await authenticateAD(user, password, adConfig);   // ✅ Updated
         passwordValid = true;
-      } catch { passwordValid = false; }
+      } catch (ldapErr) {
+        console.error(`LDAP precheck failed for ${user.username}:`, ldapErr.message);
+        passwordValid = false;
+      }
     } else {
       passwordValid = bcrypt.compareSync(password, user.passwordHash);
       if (passwordValid && user.passwordExpiryDate && new Date(user.passwordExpiryDate) < new Date()) {
@@ -53,11 +164,15 @@ exports.precheck = async (req, res) => {
       }
     }
 
-    if (!passwordValid) return res.status(401).send({ message: "Invalid credentials" });
+    if (!passwordValid) {
+      return res.status(401).send({ message: "Invalid credentials" });
+    }
 
     // केवल फैक्ट्री सुविधाएँ लौटाएँ
     const allFacilities = await user.getFacilities({ attributes: ["id", "name", "code", "type"] });
-    const facilities = allFacilities.filter(f => f.type === "FACTORY").map(f => ({ id: f.id, name: f.name, code: f.code, type: f.type }));
+    const facilities = allFacilities
+      .filter(f => f.type === "FACTORY")
+      .map(f => ({ id: f.id, name: f.name, code: f.code, type: f.type }));
 
     res.send({
       id: user.id,
@@ -91,7 +206,7 @@ exports.signin = async (req, res) => {
         entityId: String(user.id),
         action: "LOGIN_FAILED",
         newValue: { Username: username },
-        changedBy:  user.id,
+        changedBy: user.id,
         ipAddress: normalizeIp(req.ip),
         comments: "Login failed – account inactive"
       });
@@ -114,14 +229,11 @@ exports.signin = async (req, res) => {
           });
           return res.status(401).send({ message: "AD authentication not enabled." });
         }
-        const client = ldap.createClient({ url: adConfig.ad_url });
-        const upn = `${user.domainUserId || user.username}@${adConfig.ad_domain || 'company.com'}`;
-        await new Promise((resolve, reject) => {
-          client.bind(upn, password, (err) => err ? reject(err) : resolve());
-        });
-        client.destroy();
+        const upn = `${user.domainUserId || user.username}@${adConfig.ad_domain || "company.com"}`;
+        await authenticateAD(user, password, adConfig);   // ✅ Updated
         passwordValid = true;
       } catch (ldapErr) {
+        console.error(`LDAP signin failed for ${user.username}:`, ldapErr.message);
         passwordValid = false;
       }
     } else {
@@ -193,7 +305,7 @@ exports.signin = async (req, res) => {
   }
 };
 
-// ---------- Facility Switch: पुरानी और नई फैसिलिटी दोनों लॉग करें ----------
+// ---------- Facility Switch ----------
 exports.facilitySwitch = async (req, res) => {
   try {
     const { oldFacilityId, newFacilityId } = req.body;
@@ -230,10 +342,10 @@ exports.facilitySwitch = async (req, res) => {
   }
 };
 
-// ---------- Logout: फैसिलिटी नाम के साथ ----------
+// ---------- Logout ----------
 exports.signout = async (req, res) => {
   try {
-    const { facilityId } = req.body;   // ✅ frontend से भेजें
+    const { facilityId } = req.body;
     const user = await User.findByPk(req.userId);
     const username = user ? user.username : 'Unknown';
 

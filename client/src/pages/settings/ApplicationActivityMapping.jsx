@@ -68,7 +68,7 @@ const ApplicationActivityMapping = () => {
   };
 
   // सभी उपलब्ध activities = fixed types + active master activities (unique)
-  const allActivityNames = [...FIXED_TYPES, ...masterActivities.map(a => a.name)];
+  const allActivityNames = [...new Set([...FIXED_TYPES, ...masterActivities.map(a => a.name)])];
 
   return (
     <Card title="Application Activity Mapping">

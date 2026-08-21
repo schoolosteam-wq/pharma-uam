@@ -10,32 +10,31 @@ import API from '../../services/api';
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+// ✅ Base URL for server (for logo)
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const SERVER_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
+
 const Login = () => {
   const [loading, setLoading] = useState(false);
   const [facilities, setFacilities] = useState([]);
   const [selectedFacility, setSelectedFacility] = useState(null);
-  const [credentials, setCredentials] = useState(null);   // ✅ username/password याद रखें
-  const { login } = useAuth();
+  const [credentials, setCredentials] = useState(null);
+  const { login, logoUrl } = useAuth();   // ✅ Added logoUrl
   const navigate = useNavigate();
   const { message } = App.useApp();
 
   const onFinish = async (values) => {
     setLoading(true);
     try {
-      // 1. Precheck – बिना token के credential वेरिफाई
       const precheckRes = await API.post('/auth/precheck', values);
       const data = precheckRes.data;
       const userFacilities = data.facilities || [];
       const isAdmin = data.roles?.some(r => r === 'ROLE_DEFAULT ADMINISTRATOR' || r === 'ROLE_ADMINISTRATOR');
 
-      // ✅ फैसिलिटीज़ localStorage में सेव करें (AppHeader के लिए)
       localStorage.setItem('userFacilities', JSON.stringify(userFacilities));
-
-      // ✅ credential भी सेव करें (multiple facility के लिए)
       setCredentials({ username: values.username, password: values.password });
 
       if (isAdmin) {
-        // एडमिन – सीधे login
         await login(values.username, values.password, null);
         localStorage.removeItem('selectedFacility');
         navigate('/');
@@ -43,24 +42,22 @@ const Login = () => {
       }
 
       if (userFacilities.length === 0) {
-        message.error('No facilities assigned. Contact administrator.');
+        message.error('No facilities assigned. Contact administrator.', 8);
         setLoading(false);
         return;
       }
 
       if (userFacilities.length === 1) {
-        // Single facility – login with that facility
         localStorage.setItem('selectedFacility', JSON.stringify(userFacilities[0]));
         await login(values.username, values.password, userFacilities[0].id);
         navigate('/');
       } else {
-        // Multiple – dropdown दिखाएँ
         setFacilities(userFacilities);
         setLoading(false);
         return;
       }
     } catch (error) {
-      message.error(error.response?.data?.message || 'Login failed');
+      message.error(error.response?.data?.message || 'Login failed', 8);
     }
     setLoading(false);
   };
@@ -68,12 +65,11 @@ const Login = () => {
   const handleFacilitySelect = async () => {
     if (!selectedFacility) { message.warning('Please select a facility'); return; }
     try {
-      // ✅ saved credentials से login करें
       await login(credentials.username, credentials.password, selectedFacility.id);
       localStorage.setItem('selectedFacility', JSON.stringify(selectedFacility));
       navigate('/');
     } catch (error) {
-      message.error(error.response?.data?.message || 'Login failed');
+      message.error(error.response?.data?.message || 'Login failed', 8);
     }
   };
 
@@ -82,9 +78,23 @@ const Login = () => {
     return (
       <div style={styles.wrapper}>
         <div style={styles.backgroundDots} />
-        <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-          style={{ width: '100%', maxWidth: 420, zIndex: 1 }}>
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          style={{ width: '100%', maxWidth: 420, zIndex: 1 }}
+        >
           <Card style={styles.card} bodyStyle={{ padding: '40px 32px' }}>
+            {/* ✅ Facility selection logo */}
+            {logoUrl && (
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                <img
+                  src={`${SERVER_BASE_URL}${logoUrl}`}
+                  alt="logo"
+                  style={{ maxHeight: 60 }}
+                />
+              </div>
+            )}
             <div style={{ textAlign: 'center', marginBottom: 24 }}>
               <MedicineBoxOutlined style={{ fontSize: 48, color: '#1a5c3e', marginBottom: 12 }} />
               <Title level={2} style={{ margin: 0, color: '#1a5c3e', fontWeight: 700 }}>Pharma UAM</Title>
@@ -104,8 +114,13 @@ const Login = () => {
                 <Option key={f.id} value={f.id}>{f.name} ({f.code})</Option>
               ))}
             </Select>
-            <Button type="primary" block size="large" onClick={handleFacilitySelect}
-              style={styles.button}>
+            <Button
+              type="primary"
+              block
+              size="large"
+              onClick={handleFacilitySelect}
+              style={styles.button}
+            >
               Enter
             </Button>
           </Card>
@@ -118,10 +133,24 @@ const Login = () => {
   return (
     <div style={styles.wrapper}>
       <div style={styles.backgroundDots} />
-      <motion.div initial="hidden" animate="visible" variants={containerVariants}
-        style={{ width: '100%', maxWidth: 420, zIndex: 1 }}>
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={containerVariants}
+        style={{ width: '100%', maxWidth: 420, zIndex: 1 }}
+      >
         <Card style={styles.card} bodyStyle={{ padding: '40px 32px' }}>
           <motion.div variants={itemVariants} style={{ textAlign: 'center', marginBottom: 32 }}>
+            {/* ✅ Main login logo */}
+            {logoUrl && (
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                <img
+                  src={`${SERVER_BASE_URL}${logoUrl}`}
+                  alt="logo"
+                  style={{ height: 110 }}
+                />
+              </div>
+            )}
             <MedicineBoxOutlined style={{ fontSize: 48, color: '#1a5c3e', marginBottom: 12 }} />
             <Title level={2} style={{ margin: 0, color: '#1a5c3e', fontWeight: 700 }}>Pharma UAM</Title>
             <Text type="secondary" style={{ fontSize: 14 }}>User Access Management System</Text>

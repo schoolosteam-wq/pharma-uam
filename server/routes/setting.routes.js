@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 const controller = require("../controllers/setting.controller");
 const { verifyToken, requirePermission } = require("../middleware/authJwt");
 
@@ -26,6 +27,27 @@ const logoStorage = multer.diskStorage({
   }
 });
 const logoUpload = multer({ storage: logoStorage });
+
+// ✅ GET current company logo (public)
+router.get("/logo", async (req, res) => {
+  try {
+    const logoPath = path.join(__dirname, "..", "uploads", "logos", "company_logo.png");
+    if (fs.existsSync(logoPath)) {
+      return res.send({ logoUrl: "/uploads/logos/company_logo.png" });
+    }
+    // try other extensions
+    const extensions = [".jpg", ".jpeg", ".svg", ".gif"];
+    for (const ext of extensions) {
+      const p = path.join(__dirname, "..", "uploads", "logos", "company_logo" + ext);
+      if (fs.existsSync(p)) {
+        return res.send({ logoUrl: "/uploads/logos/company_logo" + ext });
+      }
+    }
+    res.send({ logoUrl: null });
+  } catch (error) {
+    res.status(500).send({ message: error.message });
+  }
+});
 
 // Logo upload route
 router.post("/upload-logo", [verifyToken, requirePermission("MANAGE_ROLES"), logoUpload.single("logo")], async (req, res) => {

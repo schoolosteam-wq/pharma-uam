@@ -1,10 +1,10 @@
-// src/pages/groups/GroupList.jsx – with permission-based UI controls
-import React, { useEffect, useState } from 'react';
+// src/pages/groups/GroupList.jsx – with backend search for members
+import React, { useEffect, useState, useRef } from 'react';
 import { Table, Button, Space, message, Modal, Form, Input, Popconfirm, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, TeamOutlined } from '@ant-design/icons';
 import groupService from '../../services/groupService';
 import userService from '../../services/userService';
-import { usePermission } from '../../hooks/usePermission';   // <-- new import
+import { usePermission } from '../../hooks/usePermission';
 
 const { Option } = Select;
 
@@ -17,12 +17,14 @@ const GroupList = () => {
 
   const [membersModalVisible, setMembersModalVisible] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState(null);
-  const [allUsers, setAllUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);        // search results
+  const [memberUsers, setMemberUsers] = useState([]);  // selected members' user objects
   const [memberIds, setMemberIds] = useState([]);
+  const [memberSearch, setMemberSearch] = useState('');
   const [membersLoading, setMembersLoading] = useState(false);
+  const searchTimeoutRef = useRef(null);
 
-  // Permission hooks
-  const { canCreate, canEdit, canDelete } = usePermission();   // <-- new
+  const { canCreate, canEdit, canDelete } = usePermission();
 
   const fetch = async () => {
     setLoading(true);
@@ -56,17 +58,35 @@ const GroupList = () => {
     } catch { message.error('Operation failed'); }
   };
 
+  // Load users from backend with search
+  const loadUsers = async (search) => {
+    setMembersLoading(true);
+    try {
+      const res = await userService.searchUsers(search, 50);
+      setAllUsers(res.data);
+    } catch {
+      message.error('Could not load users');
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
   const openMembersModal = async (record) => {
     setSelectedGroup(record);
     setMembersModalVisible(true);
+    setMemberSearch('');
+    setAllUsers([]);
+    setMemberUsers([]);
+    setMemberIds([]);
+
     try {
-      const res = await userService.getAll();
-      setAllUsers(res.data);
-    } catch { message.error('Could not load users'); }
-    try {
-      const res = await groupService.getMembers(record.id);
-      setMemberIds(res.data.map(u => u.id));
+      const membersRes = await groupService.getMembers(record.id);
+      setMemberIds(membersRes.data.map(u => u.id));
+      setMemberUsers(membersRes.data); // selected members' full objects
     } catch { message.error('Could not load members'); }
+
+    // Load initial users (first page)
+    await loadUsers('');
   };
 
   const handleMembersSave = async () => {
@@ -77,6 +97,17 @@ const GroupList = () => {
       setMembersModalVisible(false);
     } catch { message.error('Failed to update members'); }
   };
+
+  const handleSearch = (value) => {
+    setMemberSearch(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      loadUsers(value);
+    }, 300);
+  };
+
+  // Merge selected members with search results for options
+  const options = [...memberUsers, ...allUsers.filter(u => !memberUsers.some(m => m.id === u.id))];
 
   const columns = [
     { title: 'Group Name', dataIndex: 'groupName' },
@@ -111,6 +142,7 @@ const GroupList = () => {
       </div>
       <Table dataSource={groups} columns={columns} rowKey="id" loading={loading} />
 
+      {/* Add/Edit Group Modal */}
       <Modal
         title={editing ? 'Edit Group' : 'Add Group'}
         open={modalVisible}
@@ -123,22 +155,29 @@ const GroupList = () => {
         </Form>
       </Modal>
 
+      {/* Manage Members Modal */}
       <Modal
         title={`Manage Members – ${selectedGroup?.groupName}`}
         open={membersModalVisible}
         onOk={handleMembersSave}
-        onCancel={() => setMembersModalVisible(false)}
+        onCancel={() => {
+          setMembersModalVisible(false);
+          if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+        }}
         width={500}
       >
         <Select
           mode="multiple"
           style={{ width: '100%' }}
-          placeholder="Select members"
+          placeholder="Search and select members"
           value={memberIds}
           onChange={setMemberIds}
           loading={membersLoading}
+          showSearch
+          onSearch={handleSearch}
+          filterOption={false}
         >
-          {allUsers.map(user => (
+          {options.map(user => (
             <Option key={user.id} value={user.id}>{user.fullName} ({user.username})</Option>
           ))}
         </Select>

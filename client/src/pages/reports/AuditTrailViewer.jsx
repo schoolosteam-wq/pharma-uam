@@ -98,10 +98,22 @@ const AuditTrailViewer = () => {
       keys = [...allKeys].filter(k => oldVal[k] || newVal[k]);
     }
 
+    const formatValue = (value) => {
+      if (value === undefined || value === null) return '';
+      if (typeof value === 'object') {
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return String(value);
+        }
+      }
+      return String(value);
+    };
+
     const rows = [];
     for (const key of keys) {
-      const oldDisplay = oldVal[key] !== undefined ? String(oldVal[key] ?? '') : '';
-      const newDisplay = newVal[key] !== undefined ? String(newVal[key] ?? '') : '';
+      const oldDisplay = formatValue(oldVal[key]);
+      const newDisplay = formatValue(newVal[key]);
 
       if (!oldDisplay && !newDisplay) continue;
 

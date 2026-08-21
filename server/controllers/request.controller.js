@@ -11,7 +11,7 @@ const UserApplicationRole = db.UserApplicationRole;
 const ActivityWorkflowDefinition = db.ActivityWorkflowDefinition;
 const { auditHelper } = require("../utils/auditHelper");
 const { sendEmail } = require("../utils/emailHelper");
-const { applyFacilityFilter } = require("../utils/facilityFilter");
+const { getUserFacilities, applyFacilityFilter } = require("../utils/facilityFilter");
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
@@ -163,6 +163,32 @@ exports.create = async (req, res) => {
     // ✅ अगर targetUserId नहीं भेजा तो requester खुद target है
     const finalTargetUserId = targetUserId || req.userId;
 
+    // ---- facilityId resolve करें ----
+    let facilityId = req.body.facilityId || null;
+
+    if (!facilityId && payload?.applicationId) {
+      const app = await db.Application.findByPk(payload.applicationId, {
+        attributes: ["id", "facilityId"]
+      });
+      facilityId = app?.facilityId || null;
+    }
+
+    if (!facilityId) {
+      const targetUser = await User.findByPk(finalTargetUserId, {
+        include: [{ model: db.Facility, as: "facilities", attributes: ["id"] }]
+      });
+      if (targetUser && targetUser.facilities && targetUser.facilities.length > 0) {
+        facilityId = targetUser.facilities[0].id;
+      }
+    }
+
+    if (!facilityId) {
+      const currentUserFacs = await getUserFacilities(req.userId);
+      if (currentUserFacs !== null && currentUserFacs.length > 0) {
+        facilityId = currentUserFacs[0];
+      }
+    }
+
     const requestNo = await generateRequestNo();
 
     const request = await Request.create({
@@ -172,18 +198,11 @@ exports.create = async (req, res) => {
       targetUserId: finalTargetUserId,
       payload,
       status: "DRAFT",
+      facilityId,
       createdBy: req.userId,
     });
 
-    const cleanNewValue = {
-      "Request No": requestNo,
-      Type: type,
-      Requester: currentUser.username,
-      Target: finalTargetUserId !== req.userId ? (await User.findByPk(finalTargetUserId))?.username : currentUser.username,
-      Payload: payload,
-    };
-
-    await auditHelper("REQUEST", request.id, "CREATED", null, cleanNewValue, req.userId, req.ip, "Request created");
+    // ❌ यहाँ कोई audit नहीं बनेगा – audit सिर्फ submit पर बनेगा
     res.status(201).send(request);
   } catch (error) {
     res.status(500).send({ message: error.message });
@@ -201,7 +220,7 @@ exports.submit = async (req, res) => {
 
     let steps = [];
 
-    // पहले fixed workflow देखें (workflow_definitions)
+    // पहले fixed workflow देखें
     const wfDef = await WorkflowDefinition.findOne({
       where: { moduleType: request.type, isActive: true }
     });
@@ -237,7 +256,47 @@ exports.submit = async (req, res) => {
       comments: "Request submitted"
     });
 
-    await auditHelper("REQUEST", request.id, "SUBMITTED", null, { Status: "SUBMITTED" }, req.userId, req.ip, "Request submitted");
+    // ===== Simple audit =====
+    const requester = await User.findByPk(request.requesterId, {
+      attributes: ["username", "fullName"]
+    });
+    const target = request.targetUserId
+      ? await User.findByPk(request.targetUserId, { attributes: ["username", "fullName"] })
+      : null;
+
+    const auditDetails = {
+      "Request No": request.requestNo,
+      Type: request.type.replace(/_/g, " "),
+      Requester: requester ? requester.fullName || requester.username : "",
+      Target: target ? target.fullName || target.username : "",
+    };
+
+    // ✅ Application name अगर payload में applicationId है
+    if (request.payload?.applicationId) {
+      const app = await db.Application.findByPk(request.payload.applicationId, {
+        attributes: ["id", "name"]
+      });
+      if (app) {
+        auditDetails["Application"] = app.name;
+      }
+    }
+
+    // ✅ Requested Role अगर payload में है
+    if (request.payload?.requestedRole) {
+      auditDetails["Requested Role"] = request.payload.requestedRole;
+    }
+
+    await auditHelper(
+      "REQUEST",
+      request.id,
+      "SUBMITTED",
+      null,
+      auditDetails,
+      req.userId,
+      req.ip,
+      "Request submitted"
+    );
+
     await sendRequestNotification(request.id, "SUBMITTED", req.userId);
 
     res.send({ message: "Request submitted", requestNo: request.requestNo });
@@ -481,8 +540,8 @@ exports.findOne = async (req, res) => {
   try {
     const request = await Request.findByPk(req.params.id, {
       include: [
-        { model: User, as: "requester", attributes: ["id", "username", "fullName"] },
-        { model: User, as: "targetUser", attributes: ["id", "username", "fullName"] },
+        { model: User, as: "requester", attributes: ["id", "username", "fullName", "department", "departmentId", "email"] },
+        { model: User, as: "targetUser", attributes: ["id", "username", "fullName", "department", "departmentId", "email"] },
         { model: RequestDocument, as: "documents" },
         {
           model: WorkflowHistory,
@@ -492,11 +551,28 @@ exports.findOne = async (req, res) => {
           include: [
             { model: User, as: "actionByUser", attributes: ["id", "username", "fullName"] }
           ]
-        }
-      ]
+        },
+        // ✅ parent request
+        { model: Request, as: "parentRequest", attributes: ["id", "requestNo", "version", "status"] },
+        // ✅ child requests (versions)
+        { model: Request, as: "childRequests", attributes: ["id", "requestNo", "version", "status"] },
+      ],
     });
     if (!request) return res.status(404).send({ message: "Request not found" });
-    res.send(request);
+
+    // ✅ Application name from payload.applicationId (if exists)
+    let applicationName = null;
+    if (request.payload?.applicationId) {
+      const app = await db.Application.findByPk(request.payload.applicationId, {
+        attributes: ["id", "name"],
+      });
+      applicationName = app ? app.name : null;
+    }
+
+    res.send({
+      ...request.toJSON(),
+      applicationName,
+    });
   } catch (error) {
     res.status(500).send({ message: error.message });
   }

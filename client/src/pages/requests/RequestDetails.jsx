@@ -1,10 +1,12 @@
-// RequestDetails.jsx – with Complete Facility Access button & modal
+// RequestDetails.jsx – with complete details, application name, comments, documents, version history
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, Descriptions, Button, Space, message, Upload, List, Timeline, Modal, Form, Input, Tag, Divider } from 'antd';
-import { UploadOutlined, CheckOutlined, RollbackOutlined, StopOutlined, SendOutlined, KeyOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Button, Space, message, Upload, List, Timeline, Modal, Form, Input, Tag, Divider, Row, Col, Typography } from 'antd';
+import { UploadOutlined, CheckOutlined, RollbackOutlined, StopOutlined, SendOutlined, KeyOutlined, EyeOutlined, HistoryOutlined } from '@ant-design/icons';
 import requestService from '../../services/requestService';
 import { useAuth } from '../../context/AuthContext';
+
+const { Text } = Typography;
 
 const RequestDetails = () => {
   const { id } = useParams();
@@ -16,10 +18,8 @@ const RequestDetails = () => {
   const [completeModalVisible, setCompleteModalVisible] = useState(false);
   const [credentialsModalVisible, setCredentialsModalVisible] = useState(false);
   const [completeForm] = Form.useForm();
-
-  // --- New state for Facility Access completion ---
   const [completeFacilityModalVisible, setCompleteFacilityModalVisible] = useState(false);
-  const [facilityAccessForm] = Form.useForm();   // separate form for facility access
+  const [facilityAccessForm] = Form.useForm();
 
   const fetchRequest = async () => {
     setLoading(true);
@@ -80,7 +80,6 @@ const RequestDetails = () => {
     }
   };
 
-  // --- New handler for Facility Access completion ---
   const handleCompleteFacilityAccess = async () => {
     try {
       const values = await facilityAccessForm.validateFields();
@@ -101,14 +100,17 @@ const RequestDetails = () => {
   const canApprove = (request.status === 'SUBMITTED' || request.status === 'IN_PROGRESS') && request.requesterId !== currentUser.id;
   const canComplete = request.status === 'APPROVED' && permissions.includes('APPROVE_REQUEST');
   const showCredentials = request.status === 'COMPLETED' && request.payload?.credentials;
-
-  // ✅ अब सिर्फ NEW_USER के लिए credential fields आवश्यक हैं
   const isCredentialType = request.type === 'NEW_USER';
 
   const history = request.workflowHistories?.sort((a, b) => new Date(a.actionDate) - new Date(b.actionDate)) || [];
 
+  // Version history data
+  const parentVersion = request.parentRequest;
+  const childVersions = request.childRequests || [];
+
   return (
     <Card title={`Request ${request.requestNo}`} extra={<Button onClick={() => navigate('/requests')}>Back</Button>}>
+      {/* Basic Information */}
       <Descriptions column={2} bordered size="small">
         <Descriptions.Item label="Type">{request.type?.replace(/_/g, ' ')}</Descriptions.Item>
         <Descriptions.Item label="Status"><Tag color={request.status === 'APPROVED' ? 'green' : 'blue'}>{request.status}</Tag></Descriptions.Item>
@@ -118,6 +120,44 @@ const RequestDetails = () => {
         <Descriptions.Item label="Current Step">{request.currentStep}</Descriptions.Item>
       </Descriptions>
 
+      {/* User Details */}
+      <Divider>User Details</Divider>
+      <Row gutter={16}>
+        <Col span={12}>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="Username">{request.requester?.username || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Department">{request.requester?.department || '-'}</Descriptions.Item>
+          </Descriptions>
+        </Col>
+        <Col span={12}>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="Target Username">{request.targetUser?.username || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Target Department">{request.targetUser?.department || '-'}</Descriptions.Item>
+          </Descriptions>
+        </Col>
+      </Row>
+
+      {/* Request Details */}
+      <Divider>Request Details</Divider>
+      <Descriptions column={1} bordered size="small">
+        {request.applicationName && (
+          <Descriptions.Item label="Application">{request.applicationName}</Descriptions.Item>
+        )}
+        {request.payload?.requestedRole && (
+          <Descriptions.Item label="Requested Role">{request.payload.requestedRole}</Descriptions.Item>
+        )}
+        {request.payload?.details && (
+          <Descriptions.Item label="Additional Details">{request.payload.details}</Descriptions.Item>
+        )}
+        {request.payload?.credentials && (
+          <Descriptions.Item label="Credentials">
+            User ID: {request.payload.credentials.userId}<br/>
+            Password: {request.payload.credentials.password}
+          </Descriptions.Item>
+        )}
+      </Descriptions>
+
+      {/* Supporting Documents */}
       <Divider>Supporting Documents</Divider>
       <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.jpg,.png,.docx">
         <Button icon={<UploadOutlined />}>Upload Document</Button>
@@ -128,6 +168,7 @@ const RequestDetails = () => {
         )} />
       )}
 
+      {/* Workflow History */}
       <Divider>Workflow History</Divider>
       <Timeline>
         {history.map((entry, idx) => (
@@ -140,6 +181,36 @@ const RequestDetails = () => {
         ))}
       </Timeline>
 
+      {/* Version History */}
+      <Divider>Version History</Divider>
+      <Row gutter={16}>
+        {parentVersion && (
+          <Col span={12}>
+            <Card size="small" title="Previous Version">
+              <p><Text strong>Request No:</Text> {parentVersion.requestNo}</p>
+              <p><Text strong>Version:</Text> {parentVersion.version}</p>
+              <p><Text strong>Status:</Text> {parentVersion.status}</p>
+              <Button size="small" onClick={() => navigate(`/requests/${parentVersion.id}`)}>View</Button>
+            </Card>
+          </Col>
+        )}
+        {childVersions.length > 0 && (
+          <Col span={12}>
+            <Card size="small" title="Newer Versions">
+              {childVersions.map(child => (
+                <div key={child.id} style={{ marginBottom: 8 }}>
+                  <p><Text strong>Request No:</Text> {child.requestNo}</p>
+                  <p><Text strong>Version:</Text> {child.version}</p>
+                  <p><Text strong>Status:</Text> {child.status}</p>
+                  <Button size="small" onClick={() => navigate(`/requests/${child.id}`)}>View</Button>
+                </div>
+              ))}
+            </Card>
+          </Col>
+        )}
+      </Row>
+
+      {/* Actions */}
       <Divider>Actions</Divider>
       <Space>
         {canSubmit && <Button icon={<SendOutlined />} type="primary" onClick={() => handleAction('submit')}>Submit for Approval</Button>}
@@ -160,7 +231,6 @@ const RequestDetails = () => {
             {isCredentialType ? 'Complete & Send Credentials' : 'Complete Request'}
           </Button>
         )}
-        {/* New button for Facility Access */}
         {request.type === 'FACILITY_ACCESS' && request.status === 'APPROVED' && permissions.includes('APPROVE_REQUEST') && (
           <Button icon={<KeyOutlined />} type="primary" onClick={() => setCompleteFacilityModalVisible(true)}>
             Complete Facility Access
@@ -186,7 +256,7 @@ const RequestDetails = () => {
         <Input.TextArea id="commentInput" rows={3} placeholder="Enter comments..." />
       </Modal>
 
-      {/* Complete Request Modal – type‑specific fields */}
+      {/* Complete Request Modal */}
       <Modal
         title={isCredentialType ? "Complete Request & Send Credentials" : "Complete Request"}
         open={completeModalVisible}
@@ -201,7 +271,6 @@ const RequestDetails = () => {
           <Form.Item name="itAdminPassword" label="Your (IT Admin) Password" rules={[{ required: true }]}>
             <Input.Password />
           </Form.Item>
-
           {isCredentialType && (
             <>
               <Form.Item name="newUserId" label="New User ID (for Application)" rules={[{ required: true }]}>

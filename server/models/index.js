@@ -90,9 +90,9 @@ db.Computer.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" })
 db.Request.belongsTo(db.Facility, { foreignKey: "facilityId", as: "facility" });
 
 // ========== FIX: Department associations (alias changed to "departmentFacility") ==========
-db.Application.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
-db.Instrument.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
-db.Computer.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
+db.Application.belongsTo(db.Facility, { foreignKey: "departmentId", as: "department" });
+db.Instrument.belongsTo(db.Facility, { foreignKey: "departmentId", as: "department" });
+db.Computer.belongsTo(db.Facility, { foreignKey: "departmentId", as: "department" });
 db.User.belongsTo(db.Facility, { foreignKey: "departmentId", as: "departmentFacility" });
 
 // Instrument ↔ Application (belongsTo)
@@ -129,6 +129,7 @@ db.Request.belongsTo(db.User, { as: "targetUser", foreignKey: "targetUserId" });
 db.Request.hasMany(db.RequestDocument, { foreignKey: "requestId", as: "documents" });
 db.Request.hasMany(db.WorkflowHistory, { foreignKey: "requestId", as: "workflowHistories" });
 db.Request.belongsTo(db.Request, { as: "parentRequest", foreignKey: "parentRequestId" });
+db.Request.hasMany(db.Request, { as: "childRequests", foreignKey: "parentRequestId" });
 
 // Application‑specific roles/groups
 db.Application.hasMany(db.ApplicationRole, { foreignKey: "applicationId", as: "applicationRoles" });

@@ -11,6 +11,7 @@ import {
   EyeOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import applicationService from '../../services/applicationService';
 import facilityService from '../../services/facilityService';
 import groupService from '../../services/groupService';
@@ -131,7 +132,7 @@ const ApplicationList = () => {
       gampCategory: record.gampCategory || undefined,
       validated: record.validated,
       eresApplicable: record.eresApplicable,
-      lastPeriodicReviewDate: record.lastPeriodicReviewDate ? record.lastPeriodicReviewDate : null,
+      lastPeriodicReviewDate: record.lastPeriodicReviewDate ? dayjs(record.lastPeriodicReviewDate) : null,
       databaseType: record.databaseType || undefined,
       auditTrailEnabled: record.auditTrailEnabled,
       applicationCriticality: record.applicationCriticality || undefined,
@@ -161,6 +162,10 @@ const ApplicationList = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
+          // ✅ Convert date to string format
+      const formattedDate = values.lastPeriodicReviewDate
+        ? values.lastPeriodicReviewDate.format('YYYY-MM-DD')
+        : null;
       const payload = {
         name: values.name,
         manufacturer: values.manufacturer || null,
@@ -173,7 +178,7 @@ const ApplicationList = () => {
         gampCategory: values.gampCategory || null,
         validated: values.validated ?? false,
         eresApplicable: values.eresApplicable ?? false,
-        lastPeriodicReviewDate: values.lastPeriodicReviewDate || null,
+        lastPeriodicReviewDate: formattedDate,
         databaseType: values.databaseType || null,
         auditTrailEnabled: values.auditTrailEnabled ?? false,
         applicationCriticality: values.applicationCriticality || null,

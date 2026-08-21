@@ -45,10 +45,8 @@ exports.create = async (req, res) => {
       }
     }
 
-    // ✅ Destructure all non-model fields
     const { roles, groups, adminGroups, instrumentIds, computerIds, ...data } = req.body;
 
-    // ✅ Validation: Check instrumentIds duplication
     if (instrumentIds && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
       const linkedInstruments = await Instrument.findAll({
         where: { id: { [Op.in]: instrumentIds }, applicationId: { [Op.ne]: null } },
@@ -94,7 +92,6 @@ exports.create = async (req, res) => {
       await app.setAdminGroups(groupRecords);
     }
 
-    // ✅ Link instruments if provided
     if (instrumentIds && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
       await Instrument.update(
         { applicationId: app.id },
@@ -102,7 +99,6 @@ exports.create = async (req, res) => {
       );
     }
 
-    // ✅ Link computers if provided
     if (computerIds && Array.isArray(computerIds) && computerIds.length > 0) {
       const computers = await Computer.findAll({ where: { id: { [Op.in]: computerIds } } });
       await app.setComputers(computers);
@@ -135,6 +131,7 @@ exports.findAll = async (req, res) => {
         { model: Instrument, as: "instruments", attributes: ["id"] },
         { model: Computer, as: "computers", attributes: ["id"] },
         { model: Facility, as: "facility", attributes: ["id", "name"] },
+        { model: Facility, as: "department", attributes: ["id", "name"] },
         {
           model: Group,
           as: "adminGroups",
@@ -180,6 +177,7 @@ exports.findOne = async (req, res) => {
         { model: Instrument, as: "instruments", attributes: ["id", "make", "model", "serialNumber"] },
         { model: Computer, as: "computers", through: { attributes: [] }, attributes: ["id", "computerMakeModel", "serialNumber"] },
         { model: Facility, as: "facility", attributes: ["id", "name"] },
+        { model: Facility, as: "department", attributes: ["id", "name"] },
         {
           model: Group,
           as: "adminGroups",
@@ -214,7 +212,6 @@ exports.update = async (req, res) => {
 
     const oldCleanValue = await buildAuditAppObject(app, undefined, undefined, undefined);
 
-    // ✅ Destructure non-model fields
     const { roles, groups, adminGroups, instrumentIds, computerIds, ...data } = req.body;
 
     if (data.facilityId !== undefined) {
@@ -224,7 +221,6 @@ exports.update = async (req, res) => {
       }
     }
 
-    // ✅ Validate instruments if provided
     if (instrumentIds !== undefined && Array.isArray(instrumentIds) && instrumentIds.length > 0) {
       const alreadyAssigned = await Instrument.findAll({
         where: {
@@ -240,6 +236,8 @@ exports.update = async (req, res) => {
         });
       }
     }
+
+    const oldStatus = app.status;
 
     await app.update({
       name: data.name,
@@ -260,38 +258,77 @@ exports.update = async (req, res) => {
       updatedBy: req.userId,
     });
 
-    // ✅ CASCADE ON RETIRED
-    if (data.status === "RETIRED" && app.status !== "RETIRED") {
-      await Instrument.update(
-        { status: "RETIRED" },
-        { where: { applicationId: app.id } }
-      );
+    // ===== GRANULAR CASCADE ON RETIRED =====
+    if (data.status === "RETIRED" && oldStatus !== "RETIRED") {
+      // 1. Retire instruments with individual audit
+      const instruments = await Instrument.findAll({ where: { applicationId: app.id } });
+      for (const inst of instruments) {
+        await inst.update({ status: "RETIRED" });
+        await auditHelper(
+          "INSTRUMENT",
+          inst.id,
+          "RETIRED_BY_APPLICATION",
+          { Status: "ACTIVE" },
+          { Status: "RETIRED", ApplicationId: app.id },
+          req.userId,
+          req.ip,
+          `Instrument retired due to application ${app.name} retirement`
+        );
+      }
 
+      // 2. Inactive computers with individual audit
       const linkedComputers = await db.Computer.findAll({
         include: [{ model: Application, as: "applications", where: { id: app.id } }],
       });
       for (const comp of linkedComputers) {
         if (comp.status !== "INACTIVE") {
           await comp.update({ status: "INACTIVE" });
+          await auditHelper(
+            "COMPUTER",
+            comp.id,
+            "INACTIVE_BY_APPLICATION",
+            { Status: "ACTIVE" },
+            { Status: "INACTIVE", ApplicationId: app.id },
+            req.userId,
+            req.ip,
+            `Computer inactivated due to application ${app.name} retirement`
+          );
         }
       }
 
+      // 3. Deactivate users with individual audit
       const activeUsers = await db.ActiveUserList.findAll({
         where: { applicationId: app.id, status: "Active" },
       });
       for (const au of activeUsers) {
         await au.update({ status: "Inactive" });
+        await auditHelper(
+          "ACTIVE_USER_BULK_UPLOAD",
+          au.id,
+          "DEACTIVATED_BY_APPLICATION",
+          null,
+          { userId: au.userId, applicationId: app.id, Status: "Inactive" },
+          req.userId,
+          req.ip,
+          `User deactivated due to application ${app.name} retirement`
+        );
       }
 
+      // Summary audit
       await auditHelper(
         "APPLICATION",
         app.id,
         "RETIRED",
-        { Status: "ACTIVE" },
-        { Status: "RETIRED", DeactivatedUsers: activeUsers.length },
+        { Status: oldStatus },
+        {
+          Status: "RETIRED",
+          RetiredInstruments: instruments.length,
+          InactiveComputers: linkedComputers.length,
+          DeactivatedUsers: activeUsers.length,
+        },
         req.userId,
         req.ip,
-        "Application retired – linked assets and users updated"
+        "Application retired – assets and users updated"
       );
     }
 
@@ -315,25 +352,25 @@ exports.update = async (req, res) => {
       await app.setAdminGroups(groupRecords);
     }
 
-    // ✅ Handle instrument linking
-    if (instrumentIds !== undefined) {
-      // Unlink instruments not in new list
-      await Instrument.update(
-        { applicationId: null },
-        { where: { applicationId: app.id, id: { [Op.notIn]: instrumentIds } } }
-      );
-      if (instrumentIds.length > 0) {
+    // ===== SKIP linking changes if application is RETIRED =====
+    if (data.status !== "RETIRED") {
+      if (instrumentIds !== undefined) {
         await Instrument.update(
-          { applicationId: app.id },
-          { where: { id: { [Op.in]: instrumentIds } } }
+          { applicationId: null },
+          { where: { applicationId: app.id, id: { [Op.notIn]: instrumentIds } } }
         );
+        if (instrumentIds.length > 0) {
+          await Instrument.update(
+            { applicationId: app.id },
+            { where: { id: { [Op.in]: instrumentIds } } }
+          );
+        }
       }
-    }
 
-    // ✅ Handle computer linking
-    if (computerIds !== undefined) {
-      const computers = await Computer.findAll({ where: { id: { [Op.in]: computerIds } } });
-      await app.setComputers(computers);
+      if (computerIds !== undefined) {
+        const computers = await Computer.findAll({ where: { id: { [Op.in]: computerIds } } });
+        await app.setComputers(computers);
+      }
     }
 
     await app.reload({
@@ -341,6 +378,8 @@ exports.update = async (req, res) => {
         { model: ApplicationRole, as: "applicationRoles" },
         { model: ApplicationGroup, as: "applicationGroups" },
         { model: Group, as: "adminGroups" },
+        { model: Instrument, as: "instruments" },
+        { model: Computer, as: "computers" },
       ],
     });
     const newCleanValue = await buildAuditAppObject(app, roles, groups);

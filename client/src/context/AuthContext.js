@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import authService from '../services/authService';
 import roleService from '../services/roleService';
+import settingsService from '../services/settingsService';   // ✅ Added
 
 const AuthContext = createContext(null);
 
@@ -8,6 +9,7 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [logoUrl, setLogoUrl] = useState(null);   // ✅ Added
 
   useEffect(() => {
     const user = authService.getCurrentUser();
@@ -15,8 +17,18 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(user);
       fetchPermissions();
     }
+    fetchLogo();   // ✅ Added
     setLoading(false);
   }, []);
+
+  const fetchLogo = async () => {
+    try {
+      const res = await settingsService.getLogo();
+      setLogoUrl(res.data.logoUrl);
+    } catch (error) {
+      console.error('Failed to load logo', error);
+    }
+  };
 
   const fetchPermissions = async () => {
     try {
@@ -32,6 +44,7 @@ export const AuthProvider = ({ children }) => {
     const userData = await authService.login(username, password, facilityId);
     setCurrentUser(userData);
     await fetchPermissions();
+    await fetchLogo();   // ✅ refresh after login
     return userData;
   };
 
@@ -44,7 +57,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('selectedFacility');
   };
 
-  const value = { currentUser, permissions, login, logout, loading };
+  const value = { currentUser, permissions, login, logout, loading, logoUrl };   // ✅ Added logoUrl
 
   return (
     <AuthContext.Provider value={value}>

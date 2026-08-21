@@ -1,4 +1,5 @@
 const db = require("../models");
+const { Op } = require("sequelize");
 const Instrument = db.Instrument;
 const Application = db.Application;
 const Computer = db.Computer;
@@ -8,15 +9,22 @@ const { getUserFacilities, applyFacilityFilter } = require("../utils/facilityFil
 
 async function buildAuditInstrumentObject(instrument, computerNames = null) {
   const facility = instrument.facilityId ? await Facility.findByPk(instrument.facilityId) : null;
+  const department = instrument.departmentId ? await Facility.findByPk(instrument.departmentId) : null;
   const app = instrument.applicationId ? await Application.findByPk(instrument.applicationId) : null;
   const computers = computerNames || (instrument.computers ? instrument.computers.map(c => c.computerMakeModel) : []);
   return {
+    "Instrument ID": instrument.instrumentId,
+    "Asset Code": instrument.assetCode,
+    "Instrument Type": instrument.instrumentType,
     Make: instrument.make,
     Model: instrument.model,
     "Serial Number": instrument.serialNumber,
     Status: instrument.status,
     Application: app ? app.name : null,
     Facility: facility ? facility.name : null,
+    Department: department ? department.name : null,
+    "Current Location": instrument.currentLocation,
+    "Connection Status": instrument.connectionStatus,
     "Connected Computers": computers,
   };
 }
@@ -31,7 +39,6 @@ exports.create = async (req, res) => {
       }
     }
 
-    // ✅ फैक्ट्री वैलिडेशन (यदि facilityId मौजूद है)
     if (facilityId) {
       const facility = await Facility.findByPk(facilityId);
       if (!facility || facility.type !== "FACTORY") {
@@ -39,18 +46,42 @@ exports.create = async (req, res) => {
       }
     }
 
-    const { make, model, serialNumber, oemDetails, status, applicationId, currentLocation, computerIds } = req.body;
+    const {
+      instrumentId, assetCode, instrumentType, make, model, serialNumber,
+      oemDetails, status, applicationId, currentLocation, departmentId,
+      connectionStatus, computerIds
+    } = req.body;
+
+    if (!instrumentId) {
+      return res.status(400).send({ message: "Instrument ID is required" });
+    }
+
     const instrument = await Instrument.create({
-      make, model, serialNumber, oemDetails, status, applicationId, currentLocation, facilityId,
+      instrumentId,
+      assetCode: assetCode || null,
+      instrumentType: instrumentType || null,
+      make: make || null,
+      model: model || null,
+      serialNumber,
+      oemDetails: oemDetails || {},
+      status: status || "ACTIVE",
+      applicationId: applicationId || null,
+      currentLocation: currentLocation || null,
+      departmentId: departmentId || null,
+      connectionStatus: connectionStatus || "Standalone",
+      facilityId: facilityId || null,
       createdBy: req.userId,
     });
+
     if (computerIds && Array.isArray(computerIds)) {
       await instrument.setComputers(computerIds);
     }
+
     const cleanNewValue = await buildAuditInstrumentObject(instrument);
     await auditHelper("INSTRUMENT", instrument.id, "CREATED", null, cleanNewValue, req.userId, req.ip, "Instrument created");
     res.status(201).send(instrument);
   } catch (error) {
+    console.error("Instrument create error:", error);
     res.status(500).send({ message: error.message });
   }
 };
@@ -61,16 +92,16 @@ exports.findAll = async (req, res) => {
       include: [
         { model: Application, as: "application", attributes: ["id", "name"] },
         { model: Computer, as: "computers", through: { attributes: [] }, attributes: ["id", "computerMakeModel"] },
-        { model: Facility, as: "facility", attributes: ["id", "name"] }
+        { model: Facility, as: "facility", attributes: ["id", "name"] },
+        { model: Facility, as: "department", attributes: ["id", "name"] },
       ]
     };
 
-    // ✅ Apply facility filter with x-facility-id header
     query = await applyFacilityFilter(
       query,
       req.userId,
-      "facilityId",                              // Instrument model mein facilityId column
-      req.headers['x-facility-id']               // Header se specific facility ID
+      "facilityId",
+      req.headers['x-facility-id']
     );
 
     const instruments = await Instrument.findAll(query);
@@ -87,7 +118,8 @@ exports.findOne = async (req, res) => {
       include: [
         { model: Application, as: "application" },
         { model: Computer, as: "computers", through: { attributes: [] } },
-        { model: Facility, as: "facility" }
+        { model: Facility, as: "facility", attributes: ["id", "name"] },
+        { model: Facility, as: "department", attributes: ["id", "name"] },
       ]
     });
     if (!instrument) return res.status(404).send({ message: "Not found" });
@@ -107,15 +139,19 @@ exports.update = async (req, res) => {
       include: [
         { model: Application, as: "application" },
         { model: Computer, as: "computers" },
-        { model: Facility, as: "facility" }
+        { model: Facility, as: "facility" },
+        { model: Facility, as: "department" },
       ]
     });
     if (!instrument) return res.status(404).send({ message: "Not found" });
 
     const oldCleanValue = await buildAuditInstrumentObject(instrument);
-    const { make, model, serialNumber, oemDetails, status, applicationId, currentLocation, computerIds, facilityId } = req.body;
+    const {
+      instrumentId, assetCode, instrumentType, make, model, serialNumber,
+      oemDetails, status, applicationId, currentLocation, departmentId,
+      connectionStatus, computerIds, facilityId
+    } = req.body;
 
-    // ✅ फैक्ट्री वैलिडेशन (यदि facilityId भेजा गया है)
     if (facilityId !== undefined) {
       const facility = await Facility.findByPk(facilityId);
       if (!facility || facility.type !== "FACTORY") {
@@ -123,39 +159,92 @@ exports.update = async (req, res) => {
       }
     }
 
+    const oldStatus = instrument.status;
+
     await instrument.update({
-      make, model, serialNumber, oemDetails, status, applicationId, currentLocation, facilityId,
+      instrumentId: instrumentId !== undefined ? instrumentId : instrument.instrumentId,
+      assetCode: assetCode !== undefined ? assetCode : instrument.assetCode,
+      instrumentType: instrumentType !== undefined ? instrumentType : instrument.instrumentType,
+      make: make !== undefined ? make : instrument.make,
+      model: model !== undefined ? model : instrument.model,
+      serialNumber: serialNumber !== undefined ? serialNumber : instrument.serialNumber,
+      oemDetails: oemDetails !== undefined ? oemDetails : instrument.oemDetails,
+      status: status !== undefined ? status : instrument.status,
+      applicationId: applicationId !== undefined ? applicationId : instrument.applicationId,
+      currentLocation: currentLocation !== undefined ? currentLocation : instrument.currentLocation,
+      departmentId: departmentId !== undefined ? departmentId : instrument.departmentId,
+      connectionStatus: connectionStatus !== undefined ? connectionStatus : instrument.connectionStatus,
+      facilityId: facilityId !== undefined ? facilityId : instrument.facilityId,
       updatedBy: req.userId,
     });
 
-    // ========== 🆕 CASCADE ON RETIRED/TRANSFERRED (ADDED) ==========
-    if ((data.status === "RETIRED" || data.status === "TRANSFERRED") && instrument.status !== data.status) {
-      // Unlink from computers
-      await db.ComputerInstrument.destroy({ where: { instrumentId: instrument.id } });
-      // Unlink from application (set applicationId null)
+    // ===== GRANULAR CASCADE ON RETIRED/TRANSFERRED =====
+    if ((status === "RETIRED" || status === "TRANSFERRED") && oldStatus !== status) {
+      // Unlink from application with audit
       if (instrument.applicationId) {
+        const app = await Application.findByPk(instrument.applicationId, { attributes: ["id", "name"] });
+        if (app) {
+          await auditHelper(
+            "APPLICATION",
+            app.id,
+            "UNLINKED_BY_INSTRUMENT",
+            { InstrumentId: instrument.id },
+            { InstrumentId: null },
+            req.userId,
+            req.ip,
+            `Application ${app.name} unlinked due to instrument ${instrument.instrumentId} ${status.toLowerCase()}`
+          );
+        }
         await instrument.update({ applicationId: null });
       }
-      // Audit
+
+      // Unlink from computers with audit
+      const linkedComputerIds = await db.ComputerInstrument.findAll({
+        where: { instrumentId: instrument.id },
+        attributes: ["computerId"],
+      });
+      for (const link of linkedComputerIds) {
+        const comp = await Computer.findByPk(link.computerId, { attributes: ["id", "hostname"] });
+        if (comp) {
+          await auditHelper(
+            "COMPUTER",
+            comp.id,
+            "UNLINKED_BY_INSTRUMENT",
+            { InstrumentId: instrument.id },
+            { InstrumentId: null },
+            req.userId,
+            req.ip,
+            `Computer ${comp.hostname} unlinked due to instrument ${instrument.instrumentId} ${status.toLowerCase()}`
+          );
+        }
+      }
+      await db.ComputerInstrument.destroy({ where: { instrumentId: instrument.id } });
+
       await auditHelper(
         "INSTRUMENT",
         instrument.id,
-        data.status,
-        { Status: "ACTIVE" },
-        { Status: data.status, Unlinked: true },
+        status,
+        { Status: oldStatus },
+        { Status: status, Unlinked: true },
         req.userId,
         req.ip,
-        `Instrument ${data.status.toLowerCase()} – links removed`
+        `Instrument ${status.toLowerCase()} – links removed`
       );
     }
 
     if (computerIds !== undefined) {
       await instrument.setComputers(computerIds);
     }
-    await instrument.reload({ include: [{ model: Computer, as: "computers" }] });
+    await instrument.reload({
+      include: [
+        { model: Computer, as: "computers" },
+        { model: Application, as: "application" },
+        { model: Facility, as: "facility" },
+        { model: Facility, as: "department" },
+      ],
+    });
     const newCleanValue = await buildAuditInstrumentObject(instrument);
 
-    // --- diff only changed fields ---
     const changedOld = {};
     const changedNew = {};
     for (const key of Object.keys(oldCleanValue)) {
@@ -166,17 +255,14 @@ exports.update = async (req, res) => {
     }
 
     if (Object.keys(changedOld).length > 0) {
-      changedOld["Make"] = instrument.make;
-      changedNew["Make"] = instrument.make;
-      changedOld["Model"] = instrument.model;
-      changedNew["Model"] = instrument.model;
-      changedOld["Serial Number"] = instrument.serialNumber;
-      changedNew["Serial Number"] = instrument.serialNumber;
+      changedOld["Instrument ID"] = instrument.instrumentId;
+      changedNew["Instrument ID"] = instrument.instrumentId;
     }
 
     await auditHelper("INSTRUMENT", instrument.id, "UPDATED", changedOld, changedNew, req.userId, req.ip, "Instrument updated");
     res.send(instrument);
   } catch (error) {
+    console.error("Instrument update error:", error);
     res.status(500).send({ message: error.message });
   }
 };
@@ -184,7 +270,12 @@ exports.update = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     const instrument = await Instrument.findByPk(req.params.id, {
-      include: [{ model: Facility, as: "facility" }, { model: Application, as: "application" }, { model: Computer, as: "computers" }]
+      include: [
+        { model: Facility, as: "facility" },
+        { model: Facility, as: "department" },
+        { model: Application, as: "application" },
+        { model: Computer, as: "computers" },
+      ]
     });
     if (!instrument) return res.status(404).send({ message: "Not found" });
     const oldCleanValue = await buildAuditInstrumentObject(instrument);

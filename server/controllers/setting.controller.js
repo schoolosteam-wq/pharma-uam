@@ -10,7 +10,7 @@ const { auditHelper } = require("../utils/auditHelper");
 exports.getADConfig = async (req, res) => {
   try {
     const settings = await Setting.findAll({
-      where: { key: ["ad_enabled", "ad_url", "ad_baseDN", "ad_username", "ad_password", "ad_syncInterval"] }
+      where: { key: ["ad_enabled", "ad_url", "ad_baseDN", "ad_domain", "ad_username", "ad_password", "ad_syncInterval"] }
     });
     const config = {};
     settings.forEach(s => { config[s.key] = s.value; });
@@ -172,6 +172,52 @@ exports.saveOUMapping = async (req, res) => {
 
     res.send({ message: "OU Mapping saved" });
   } catch (error) {
+    res.status(500).send({ message: error.message });
+  }
+};
+
+// ---------- COMPANY LOGO ----------
+
+// GET current logo (public)
+exports.getLogo = async (req, res) => {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const possibleExtensions = [".png", ".jpg", ".jpeg", ".svg", ".gif"];
+    for (const ext of possibleExtensions) {
+      const logoPath = path.join(__dirname, "..", "uploads", "logos", "company_logo" + ext);
+      if (fs.existsSync(logoPath)) {
+        return res.send({ logoUrl: "/uploads/logos/company_logo" + ext });
+      }
+    }
+    res.send({ logoUrl: null });
+  } catch (error) {
+    res.status(500).send({ message: error.message });
+  }
+};
+
+// Upload logo (protected)
+exports.uploadLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).send({ message: "No file uploaded" });
+    }
+
+    // Audit trail for logo upload
+    await auditHelper(
+      "SETTING",
+      "LOGO",
+      "UPLOADED",
+      null,
+      { Filename: req.file.originalname, Path: req.file.path },
+      req.userId,
+      req.ip,
+      "Company logo uploaded"
+    );
+
+    res.send({ message: "Logo uploaded successfully", path: req.file.path });
+  } catch (error) {
+    console.error("Logo upload error:", error);
     res.status(500).send({ message: error.message });
   }
 };
